@@ -1,0 +1,106 @@
+{
+  "entities": {
+    "KumaUser": {
+      "title": "KumaUser",
+      "description": "User account containing credentials and active sync key",
+      "type": "object",
+      "properties": {
+        "username": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 20
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "password": {
+          "type": "string",
+          "minLength": 4
+        },
+        "syncKey": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        }
+      },
+      "required": ["username", "password", "syncKey", "createdAt"]
+    },
+    "SyncProfile": {
+      "title": "SyncProfile",
+      "description": "Metadata for a transaction sync profile key",
+      "type": "object",
+      "properties": {
+        "syncKey": {
+          "type": "string"
+        },
+        "lastSyncedAt": {
+          "type": "number"
+        },
+        "transactionCount": {
+          "type": "number"
+        },
+        "incomeCategories": {
+          "type": "array"
+        },
+        "expenseCategories": {
+          "type": "array"
+        }
+      },
+      "required": ["syncKey", "lastSyncedAt"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "An individual ledger transaction containing amounts and categories",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "amount": {
+          "type": "number"
+        },
+        "type": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "subCategory": {
+          "type": "string"
+        },
+        "date": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "slipImage": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "amount", "type", "category", "date", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/kuma_users/{username}": {
+      "schema": "KumaUser",
+      "description": "User profiles registered with username and password"
+    },
+    "/sync_profiles/{syncKey}": {
+      "schema": "SyncProfile",
+      "description": "The root sync profiles referenced by sync keys"
+    },
+    "/sync_profiles/{syncKey}/transactions/{txId}": {
+      "schema": "Transaction",
+      "description": "Sub-collection containing all transactions under a sync profile"
+    }
+  }
+}

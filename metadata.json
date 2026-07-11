@@ -1,0 +1,6 @@
+{
+  "name": "Lovely Income & Expense Tracker",
+  "description": "โปรแกรมทำบัญชีรายรับ-รายจ่ายแสนน่ารัก ใช้งานง่าย มีสถิติกราฟรายวัน ระบบแจ้งเตือน และสำรองข้อมูลบนคลาวด์อัตโนมัติ สำหรับ iOS และ Android",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

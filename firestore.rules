@@ -1,0 +1,25 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global safety net - default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // kuma_users collection: allow queries and registration
+    match /kuma_users/{username} {
+      allow read, write: if true;
+    }
+
+    // sync_profiles collection: allow checking sync keys
+    match /sync_profiles/{syncKey} {
+      allow read, write: if true;
+    }
+
+    // sync_profiles/{syncKey}/transactions sub-collection: allow reading and writing user ledger data
+    match /sync_profiles/{syncKey}/transactions/{txId} {
+      allow read, write: if true;
+    }
+  }
+}
