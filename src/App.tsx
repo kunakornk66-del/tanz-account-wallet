@@ -19,6 +19,7 @@ import {
   validateUsername,
   signUpUser,
   loginUser,
+  loginWithGoogle,
   uploadCategoriesToCloud,
   downloadCategoriesFromCloud
 } from './firebase';
@@ -49,46 +50,18 @@ import {
   LogIn,
   LogOut,
   User,
+  Lock,
   Paperclip,
   Eye,
+  EyeOff,
+  RefreshCw,
   Download,
   List,
   Smartphone
 } from 'lucide-react';
 
-// Seeding standard cute transactions if user is starting fresh
-const INITIAL_TRANSACTIONS: Transaction[] = [
-  {
-    id: 'seed-1',
-    type: 'income',
-    amount: 500,
-    category: 'allowance',
-    description: 'คุณแม่ให้ค่าขนมรายสัปดาห์ 🎁',
-    date: new Date().toISOString().split('T')[0],
-    time: '08:30',
-    createdAt: Date.now() - 3600000 * 4
-  },
-  {
-    id: 'seed-2',
-    type: 'expense',
-    amount: 65,
-    category: 'food',
-    description: 'ชานมไข่มุกหวานร้อยแสนอร่อย 🧋',
-    date: new Date().toISOString().split('T')[0],
-    time: '12:15',
-    createdAt: Date.now() - 3600000 * 2
-  },
-  {
-    id: 'seed-3',
-    type: 'expense',
-    amount: 290,
-    category: 'shopping',
-    description: 'ตุ๊กตาหมีคุมะน้อยแก้เหงา 🧸',
-    date: new Date().toISOString().split('T')[0],
-    time: '15:45',
-    createdAt: Date.now() - 3600000
-  }
-];
+// No initial transactions - start completely fresh
+const INITIAL_TRANSACTIONS: Transaction[] = [];
 
 export default function App() {
   // --- Core Application States ---
@@ -117,6 +90,13 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [loggedInUser, setLoggedInUser] = useState<string | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+
+  // Full screen Login/Signup states for initial lock
+  const [authTab, setAuthTab] = useState<'login' | 'signup'>('login');
+  const [authUsername, setAuthUsername] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [showAuthPassword, setShowAuthPassword] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
   
   // Filtering states
   const [selectedMonth, setSelectedMonth] = useState<string>(() => {
@@ -418,8 +398,12 @@ export default function App() {
     setSyncKey(userSyncKey);
     localStorage.setItem('kuma_sync_key', userSyncKey);
     
-    // Trigger backup of current transactions immediately to make sure they are saved on their new syncKey!
-    await triggerAutoCloudBackup(transactions);
+    // Always start with a completely fresh slate on signup as requested!
+    setTransactions([]);
+    localStorage.setItem('kuma_transactions', JSON.stringify([]));
+    
+    // Trigger backup of empty transactions immediately to make sure they are saved on their new syncKey!
+    await triggerAutoCloudBackup([]);
     // Backup categories too
     await uploadCategoriesToCloud(userSyncKey, incomeCategories, expenseCategories);
   };
@@ -901,8 +885,291 @@ export default function App() {
     return map;
   }, [transactions]);
 
+  // Full screen Auth Handlers
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!authUsername.trim() || !authPassword) {
+      addToast('กรุณากรอกข้อมูลให้ครบถ้วนด้วยน้า 🔑', 'error');
+      return;
+    }
+
+    setIsAuthLoading(true);
+    try {
+      if (authTab === 'login') {
+        const result = await loginUser(authUsername, authPassword);
+        if (result.success && result.username && result.syncKey) {
+          addToast(result.message, 'success');
+          handleLoginSuccess(result.username, result.syncKey);
+        } else {
+          addToast(result.message || 'เข้าสู่ระบบไม่สำเร็จครับ 🥺', 'error');
+        }
+      } else {
+        // Sign Up
+        const result = await signUpUser(authUsername, authPassword, syncKey);
+        if (result.success && result.username && result.syncKey) {
+          addToast(result.message, 'success');
+          handleSignupSuccess(result.username, result.syncKey);
+        } else {
+          addToast(result.message || 'สมัครสมาชิกไม่สำเร็จครับ 🥺', 'error');
+        }
+      }
+    } catch (err) {
+      console.error('Auth error:', err);
+      addToast('เกิดข้อผิดพลาดจากระบบเซิร์ฟเวอร์ กรุณาลองใหม่อีกครั้งครับ 🥺', 'error');
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+  const handleAuthGoogleSignIn = async () => {
+    setIsAuthLoading(true);
+    try {
+      const result = await loginWithGoogle(syncKey);
+      if (result.success && result.username && result.syncKey) {
+        addToast(result.message, 'success');
+        handleLoginSuccess(result.username, result.syncKey);
+      } else {
+        addToast(result.message || 'ไม่สามารถลงชื่อเข้าใช้งานด้วย Google ได้ครับ 🥺', 'error');
+      }
+    } catch (err) {
+      console.error('Google Auth error:', err);
+      addToast('เกิดข้อผิดพลาดในการเชื่อมต่อ Google Auth 🥺', 'error');
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+  if (!loggedInUser) {
+    return (
+      <div className={`min-h-screen font-sans flex flex-col items-center justify-center p-4 transition-all duration-300 ${currentTheme.background} ${currentTheme.textPrimary}`}>
+        {/* Dynamic Toast Container */}
+        <ToastContainer toasts={toasts} onClose={removeToast} />
+
+        {/* Theme Quick Switcher on Login Screen */}
+        <div className="absolute top-4 right-4 z-50">
+          <button
+            onClick={() => {
+              const themeIds = APP_THEMES.map(t => t.id);
+              const currentIndex = themeIds.indexOf(selectedThemeId);
+              const nextIndex = (currentIndex + 1) % themeIds.length;
+              handleThemeChange(themeIds[nextIndex]);
+            }}
+            className={`p-2.5 rounded-2xl border transition-all active:scale-95 flex items-center gap-1.5 shadow-sm text-xs font-extrabold ${
+              isDark 
+                ? 'bg-slate-900/90 border-slate-800 text-amber-400 hover:bg-slate-800' 
+                : 'bg-white/95 border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+            title="เปลี่ยนธีมหน้าจอ"
+          >
+            <Palette size={14} className="text-pink-500" />
+            <span className="hidden sm:inline">เปลี่ยนธีม</span>
+          </button>
+        </div>
+
+        {/* Brand App Icon & Name */}
+        <div className="flex flex-col items-center text-center space-y-2 mb-6">
+          <div className="relative">
+            <div className={`absolute inset-0 rounded-full blur-2xl opacity-40 animate-pulse ${
+              isDark ? 'bg-amber-500' : 'bg-rose-500'
+            }`} />
+            <img 
+              src="https://img.icons8.com/fluency/512/wallet.png" 
+              alt="CashSniper Wallet" 
+              className="w-24 h-24 relative select-none animate-cute-float"
+            />
+          </div>
+          <h1 className="text-3xl font-extrabold tracking-tight flex items-center justify-center gap-2">
+            <span>CashSniper</span>
+            <span className="text-xs font-extrabold px-2 py-0.5 rounded-full bg-rose-500 text-white shadow-sm animate-pulse">v2.0</span>
+          </h1>
+          <p className="text-slate-400 text-xs font-bold">
+            บันทึกรายรับ-รายจ่ายสุดอัจฉริยะ แม่นยำ และรวดเร็ว 🎯💸
+          </p>
+        </div>
+
+        {/* Auth Main Card */}
+        <div 
+          className={`w-full max-w-sm rounded-3xl border p-6 relative shadow-2xl transition-all duration-300 bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 text-slate-800 dark:text-white`}
+        >
+          {/* Slidey Pill Tab Switcher */}
+          <div className={`grid grid-cols-2 p-1.5 rounded-2xl mb-5 border ${
+            isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-100 border-slate-200/50'
+          }`}>
+            <button
+              onClick={() => { setAuthTab('login'); setAuthPassword(''); }}
+              disabled={isAuthLoading}
+              className={`py-2 px-3 rounded-xl text-xs font-bold transition-all ${
+                authTab === 'login'
+                  ? isDark ? 'bg-slate-800 text-amber-400 shadow-sm' : 'bg-white text-rose-500 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-500'
+              }`}
+            >
+              เข้าสู่ระบบ
+            </button>
+            <button
+              onClick={() => { setAuthTab('signup'); setAuthPassword(''); }}
+              disabled={isAuthLoading}
+              className={`py-2 px-3 rounded-xl text-xs font-bold transition-all ${
+                authTab === 'signup'
+                  ? isDark ? 'bg-slate-800 text-amber-400 shadow-sm' : 'bg-white text-rose-500 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-500'
+              }`}
+            >
+              สมัครสมาชิกใหม่
+            </button>
+          </div>
+
+          {/* Prompt banner */}
+          <div className={`p-3 rounded-2xl text-xs mb-5 border ${
+            isDark 
+              ? 'bg-slate-950/50 border-slate-800/80 text-slate-300' 
+              : 'bg-rose-50/40 border-rose-100/50 text-slate-600'
+          }`}>
+            <p className="leading-relaxed text-[11px] font-semibold">
+              {authTab === 'login' 
+                ? '💡 กรุณาลงชื่อเข้าใช้เพื่อเปิดระบบกระเป๋าเงิน และเชื่อมโยงข้อมูลคลาวด์ของคุณทันทีครับ!' 
+                : '🧸 สมัครสมาชิกบัญชีใหม่ ข้อมูลบัญชีของท่านจะเริ่มต้นใหม่ทั้งหมดโดยไม่มีตัวอย่าง รวดเร็วและปลอดภัย!'}
+            </p>
+          </div>
+
+          {/* Form */}
+          <form onSubmit={handleAuthSubmit} className="space-y-4">
+            {/* Username */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                Username
+              </label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                  <User size={15} />
+                </span>
+                <input
+                  type="text"
+                  value={authUsername}
+                  onChange={(e) => setAuthUsername(e.target.value)}
+                  disabled={isAuthLoading}
+                  placeholder="ภาษาอังกฤษและตัวเลขเท่านั้น (เช่น cash_user)"
+                  className={`w-full pl-9 pr-4 py-2.5 rounded-2xl text-xs font-semibold border transition-all focus:outline-hidden ${
+                    isDark
+                      ? 'bg-slate-950 border-slate-800 text-white focus:border-amber-400/50'
+                      : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-rose-400/50 focus:bg-white'
+                  }`}
+                />
+              </div>
+            </div>
+
+            {/* Password */}
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                  รหัสผ่าน (Password)
+                </label>
+                {authTab === 'signup' && (
+                  <span className="text-[9px] font-semibold text-rose-500">ขั้นต่ำ 4 ตัวอักษร</span>
+                )}
+              </div>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                  <Lock size={15} />
+                </span>
+                <input
+                  type={showAuthPassword ? 'text' : 'password'}
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  disabled={isAuthLoading}
+                  placeholder="กรอกรหัสผ่านของคุณ"
+                  className={`w-full pl-9 pr-10 py-2.5 rounded-2xl text-xs font-semibold border transition-all focus:outline-hidden ${
+                    isDark
+                      ? 'bg-slate-950 border-slate-800 text-white focus:border-amber-400/50'
+                      : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-rose-400/50 focus:bg-white'
+                  }`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowAuthPassword(!showAuthPassword)}
+                  className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-slate-400 hover:text-slate-500 transition-colors"
+                >
+                  {showAuthPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+            </div>
+
+            {/* Submit */}
+            <button
+              type="submit"
+              disabled={isAuthLoading}
+              className={`w-full py-3 rounded-2xl text-xs font-extrabold text-white flex items-center justify-center gap-1.5 transition-all active:scale-97 shadow-md ${
+                isDark 
+                  ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 shadow-amber-500/10' 
+                  : 'bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 shadow-rose-500/10'
+              } ${isAuthLoading ? 'opacity-70 cursor-not-allowed animate-pulse' : ''}`}
+            >
+              {isAuthLoading ? (
+                <RefreshCw size={14} className="animate-spin" />
+              ) : authTab === 'login' ? (
+                <LogIn size={14} />
+              ) : (
+                <Sparkles size={14} />
+              )}
+              <span>
+                {isAuthLoading 
+                  ? 'กำลังเชื่อมต่อเซิร์ฟเวอร์...' 
+                  : authTab === 'login' ? 'เข้าสู่ระบบบัญชีของคุณ' : 'สร้างบัญชีและใช้งานฟรี'}
+              </span>
+            </button>
+          </form>
+
+          {/* Divider */}
+          <div className="flex items-center my-4">
+            <div className="flex-1 border-t border-slate-200 dark:border-slate-800"></div>
+            <span className="px-2 text-[10px] font-bold text-slate-400 uppercase">หรือ</span>
+            <div className="flex-1 border-t border-slate-200 dark:border-slate-800"></div>
+          </div>
+
+          {/* Google */}
+          <button
+            type="button"
+            onClick={handleAuthGoogleSignIn}
+            disabled={isAuthLoading}
+            className={`w-full py-2.5 rounded-2xl text-xs font-bold transition-all active:scale-97 border flex items-center justify-center gap-2 ${
+              isDark 
+                ? 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800/50 hover:text-white' 
+                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+              <path
+                fill="#EA4335"
+                d="M12 5.04c1.66 0 3.2.57 4.38 1.69l3.27-3.27C17.68 1.54 14.98 1 12 1 7.35 1 3.37 3.67 1.39 7.56l3.89 3.02c1-2.93 3.73-5.54 6.72-5.54z"
+              />
+              <path
+                fill="#4285F4"
+                d="M23.49 12.27c0-.81-.07-1.59-.2-2.36H12v4.51h6.46c-.29 1.48-1.14 2.73-2.4 3.58l3.73 2.89c2.18-2.01 3.7-4.99 3.7-8.62z"
+              />
+              <path
+                fill="#FBBC05"
+                d="M5.28 14.54c-.24-.72-.38-1.5-.38-2.31s.14-1.59.38-2.31L1.39 7.56C.5 9.36 0 11.33 0 13.41s.5 4.05 1.39 5.85l3.89-3.02z"
+              />
+              <path
+                fill="#34A853"
+                d="M12 22.96c3.24 0 5.97-1.07 7.96-2.91l-3.73-2.89c-1.1.74-2.5 1.18-4.23 1.18-2.99 0-5.72-2.61-6.72-5.54l-3.89 3.02c1.98 3.89 5.96 6.56 10.61 6.56z"
+              />
+            </svg>
+            <span>เชื่อมต่อผ่านบัญชี Google ☁️</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={`min-h-screen font-sans transition-colors duration-300 pb-24 ${currentTheme.background} ${currentTheme.textPrimary}`}>
+    <motion.div
+      key={selectedThemeId}
+      initial={{ opacity: 0.2 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.45, ease: "easeInOut" }}
+      className={`min-h-screen font-sans pb-24 ${currentTheme.background} ${currentTheme.textPrimary}`}
+    >
       
       {/* Dynamic Toast Container */}
       <ToastContainer toasts={toasts} onClose={removeToast} />
@@ -912,14 +1179,18 @@ export default function App() {
         isDark ? 'bg-slate-950/80 backdrop-blur-md' : 'bg-white/80 backdrop-blur-md'
       }`}>
         <div className="flex items-center gap-2">
-          {/* Animated Mascot Head Icon */}
-          <div className="text-3xl animate-cute-float">🧸</div>
+          {/* Animated Mascot Wallet Icon */}
+          <img 
+            src="https://img.icons8.com/fluency/96/wallet.png" 
+            alt="CashSniper Wallet" 
+            className="w-8 h-8 select-none animate-cute-float"
+          />
           <div>
             <h1 className="text-sm font-extrabold tracking-tight flex items-center gap-1">
-              <span>บัญชีคุมะคิง</span> 
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-500 text-white animate-pulse">Ka-Ching</span>
+              <span>CashSniper</span> 
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-500 text-white animate-pulse">Snipe Expense</span>
             </h1>
-            <p className="text-[9px] font-bold text-slate-400">ผู้ช่วยออมเงินสุดคิ้วท์ ☁️</p>
+            <p className="text-[9px] font-bold text-slate-400">บันทึกบัญชีอัจฉริยะ แม่นยำ รวดเร็ว 🎯💸</p>
           </div>
         </div>
 
@@ -2327,6 +2598,6 @@ export default function App() {
         onSignupSuccess={handleSignupSuccess}
         addToast={addToast}
       />
-    </div>
+    </motion.div>
   );
 }
