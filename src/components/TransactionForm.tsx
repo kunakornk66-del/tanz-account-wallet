@@ -49,7 +49,7 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
 
   const [date, setDate] = useState<string>(defaultDate || getLocalDateString());
   const [time, setTime] = useState<string>(getLocalTimeString());
-  const [slipImage, setSlipImage] = useState<string>('');
+  const [slipImages, setSlipImages] = useState<string[]>([]);
   const [subCategory, setSubCategory] = useState<string>('');
 
   const categories = type === 'income' ? incomeCategories : expenseCategories;
@@ -64,12 +64,20 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
       setDescription(editingTransaction.description);
       setDate(editingTransaction.date);
       setTime(editingTransaction.time);
-      setSlipImage(editingTransaction.slipImage || '');
+      
+      // Handle backward compatibility for single slipImage vs multiple slipImages
+      if (editingTransaction.slipImages && editingTransaction.slipImages.length > 0) {
+        setSlipImages(editingTransaction.slipImages);
+      } else if (editingTransaction.slipImage) {
+        setSlipImages([editingTransaction.slipImage]);
+      } else {
+        setSlipImages([]);
+      }
     } else {
       // Reset form (keep date/time as current or let user keep it)
       setAmount('');
       setDescription('');
-      setSlipImage('');
+      setSlipImages([]);
       setSubCategory('');
       setDate(defaultDate || getLocalDateString());
       if (categories.length > 0) {
@@ -96,29 +104,40 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
   }, [category, editingTransaction]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        if (addToast) {
-          addToast('รูปภาพต้องมีขนาดไม่เกิน 2MB นะครับ 🥺', 'error');
-        } else {
-          alert('รูปภาพต้องมีขนาดไม่เกิน 2MB');
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      let oversizedCount = 0;
+      
+      Array.from(files).forEach((file: File) => {
+        if (file.size > 2 * 1024 * 1024) {
+          oversizedCount++;
+          return;
         }
-        return;
-      }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setSlipImage(reader.result as string);
+        
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const resultStr = reader.result as string;
+          setSlipImages((prev) => [...prev, resultStr]);
+        };
+        reader.readAsDataURL(file);
+      });
+      
+      if (oversizedCount > 0) {
+        if (addToast) {
+          addToast(`มีรูปภาพ ${oversizedCount} รูป ขนาดเกิน 2MB (ข้ามรูปเหล่านี้นะค้าบ) 🥺`, 'error');
+        } else {
+          alert(`มีบางรูปภาพขนาดเกิน 2MB`);
+        }
+      } else {
         if (addToast) {
           addToast('แนบรูปภาพสลิปเรียบร้อยแล้วครับ! 🧾📸', 'success');
         }
-      };
-      reader.readAsDataURL(file);
+      }
     }
   };
 
-  const handleRemoveSlip = () => {
-    setSlipImage('');
+  const handleRemoveSlip = (indexToRemove: number) => {
+    setSlipImages((prev) => prev.filter((_, idx) => idx !== indexToRemove));
     if (addToast) {
       addToast('ลบรูปภาพสลิปเรียบร้อยแล้วครับ 🗑️', 'info');
     }
@@ -153,7 +172,8 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
       description: description.trim() || categories.find(c => c.id === category)?.name || 'อื่นๆ',
       date,
       time,
-      slipImage: slipImage || undefined
+      slipImage: slipImages[0] || undefined,
+      slipImages: slipImages.length > 0 ? slipImages : undefined
     });
 
     // Reset fields if adding new
@@ -163,7 +183,7 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
       setSubCategory('');
       setDate(getLocalDateString());
       setTime(getLocalTimeString());
-      setSlipImage('');
+      setSlipImages([]);
     }
   };
 
@@ -421,57 +441,79 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
       }`}>
         <label className="flex items-center gap-1.5 text-xs font-bold mb-2 text-slate-500 dark:text-slate-400">
           <Paperclip size={13} />
-          <span>แนบรูปสลิปธนาคาร (ไม่บังคับ) 🧾✨</span>
+          <span>แนบรูปสลิปธนาคาร (ไม่จำกัดจำนวน) 🧾✨</span>
         </label>
 
-        {!slipImage ? (
-          <div className="relative">
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleFileChange}
-              id="slip-image-upload"
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-            />
-            <div className={`border-2 border-dashed rounded-xl p-4 text-center transition-all ${
-              isDark 
-                ? 'border-slate-800 hover:border-amber-500 hover:bg-slate-850/50' 
-                : 'border-slate-200 hover:border-rose-400 hover:bg-rose-50/30'
-            }`}>
-              <ImageIcon className="mx-auto mb-1 text-slate-400" size={20} />
-              <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                คลิกเพื่อเลือกไฟล์รูปภาพ หรือ ถ่ายรูปสลิป
-              </p>
-              <p className="text-[9px] text-slate-400">
-                ขนาดไฟล์ไม่เกิน 2MB (JPG, PNG)
-              </p>
-            </div>
+        {/* Upload Box (Always visible so they can add multiple slips) */}
+        <div className="relative mb-3">
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleFileChange}
+            id="slip-image-upload"
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          />
+          <div className={`border-2 border-dashed rounded-xl p-4 text-center transition-all ${
+            isDark 
+              ? 'border-slate-800 hover:border-amber-500 hover:bg-slate-850/50' 
+              : 'border-slate-200 hover:border-rose-400 hover:bg-rose-50/30'
+          }`}>
+            <ImageIcon className="mx-auto mb-1 text-slate-400" size={20} />
+            <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+              คลิกเพื่อเลือกไฟล์รูปภาพ หรือ ถ่ายรูปสลิป (เลือกได้หลายรูป)
+            </p>
+            <p className="text-[9px] text-slate-400">
+              ขนาดไฟล์ไม่เกิน 2MB ต่อรูป (JPG, PNG)
+            </p>
           </div>
-        ) : (
-          <div className="relative rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-2">
-            <div className="flex items-center gap-3">
-              <img
-                src={slipImage}
-                alt="Uploaded bank slip"
-                referrerPolicy="no-referrer"
-                className="w-12 h-16 object-cover rounded-md border border-slate-100 dark:border-slate-850 shadow-xs"
-              />
-              <div className="flex-1 min-w-0">
-                <p className="text-[11px] font-bold text-emerald-500 dark:text-emerald-400 flex items-center gap-1">
-                  <span>✓ แนบรูปภาพสำเร็จ</span>
-                </p>
-                <p className="text-[9px] text-slate-400 truncate">
-                  พร้อมบันทึกคู่กับรายการนี้แล้วครับ
-                </p>
-              </div>
+        </div>
+
+        {/* Uploaded Slips Grid */}
+        {slipImages.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex justify-between items-center px-1">
+              <span className="text-[10px] font-extrabold text-emerald-500 dark:text-emerald-400 flex items-center gap-1">
+                <span>✓ แนบรูปภาพสำเร็จ {slipImages.length} รูป</span>
+              </span>
               <button
                 type="button"
-                onClick={handleRemoveSlip}
-                className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-500 transition-all dark:bg-red-950/30 dark:hover:bg-red-950/50"
-                title="ลบรูปภาพสลิป"
+                onClick={() => {
+                  setSlipImages([]);
+                  if (addToast) addToast('ลบรูปภาพสลิปทั้งหมดเรียบร้อยแล้วครับ 🗑️', 'info');
+                }}
+                className="text-[9px] font-bold text-red-500 hover:underline flex items-center gap-0.5 transition-colors"
               >
-                <Trash2 size={14} />
+                <Trash2 size={10} /> ลบทั้งหมด
               </button>
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              {slipImages.map((img, idx) => (
+                <div 
+                  key={idx} 
+                  className="relative group aspect-3/4 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-1 shadow-xs"
+                >
+                  <img
+                    src={img}
+                    alt={`Uploaded slip ${idx + 1}`}
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover rounded-md"
+                  />
+                  {/* Delete overlay button */}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveSlip(idx)}
+                    className="absolute -top-1.5 -right-1.5 p-1 rounded-full bg-red-500 text-white shadow-md hover:bg-red-600 transition-all active:scale-90 z-10"
+                    title={`ลบรูปภาพที่ ${idx + 1}`}
+                  >
+                    <X size={10} className="stroke-[3]" />
+                  </button>
+                  {/* Counter badge */}
+                  <span className="absolute bottom-1 left-1 px-1 py-0.2 rounded text-[8px] font-extrabold bg-black/60 text-white select-none">
+                    #{idx + 1}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         )}

@@ -11,6 +11,7 @@ export interface Transaction {
   time: string; // HH:MM
   createdAt: number; // timestamp
   slipImage?: string; // Optional base64 or file URL for bank slip
+  slipImages?: string[]; // Optional array of base64 or file URLs for multiple bank slips
 }
 
 export type ThemeType = 'cherry' | 'matcha' | 'blueberry' | 'peach' | 'cocoa' | 'natural';

@@ -90,6 +90,7 @@ export default function App() {
   const [syncKey, setSyncKey] = useState<string>('');
   const [lastSyncedAt, setLastSyncedAt] = useState<number>(0);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [isInitialSync, setIsInitialSync] = useState<boolean>(false);
   const [loggedInUser, setLoggedInUser] = useState<string | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
 
@@ -349,75 +350,84 @@ export default function App() {
 
   // --- Custom Authentication Handlers ---
   const handleLoginSuccess = async (username: string, userSyncKey: string) => {
-    setLoggedInUser(username);
-    localStorage.setItem('kuma_logged_in_user', username);
-    
-    // Switch to the user's sync key
-    setSyncKey(userSyncKey);
-    localStorage.setItem('kuma_sync_key', userSyncKey);
-    
-    // Download cloud data for this key
-    setIsSyncing(true);
-    addToast('กำลังดึงข้อมูลกระเป๋าเงินของคุณจากระบบคลาวด์... 🧸☁️', 'info');
-    const downloadedTx = await downloadTransactionsFromCloud(userSyncKey);
-    const downloadedCats = await downloadCategoriesFromCloud(userSyncKey);
-    const downloadedTheme = await downloadThemeFromCloud(userSyncKey);
-    setIsSyncing(false);
-    
-    // 1. Recover/sync theme
-    if (downloadedTheme) {
-      setSelectedThemeId(downloadedTheme as ThemeType);
-      localStorage.setItem('kuma_theme', downloadedTheme);
-    } else {
-      // Back up current theme if they don't have one saved on cloud yet
-      const currentThemeId = localStorage.getItem('kuma_theme') || 'warm-rose';
-      await uploadThemeToCloud(userSyncKey, currentThemeId);
-    }
-
-    // 2. Recover/sync transactions using ID deduplication so guest/local data is merged
-    let finalTxList: Transaction[] = [];
-    if (downloadedTx !== null && downloadedTx.length > 0) {
-      const localTx = transactions || [];
-      const combined = [...downloadedTx, ...localTx];
-      const uniqueMap = new Map();
-      combined.forEach(t => {
-        if (!uniqueMap.has(t.id)) {
-          uniqueMap.set(t.id, t);
-        }
-      });
-      finalTxList = Array.from(uniqueMap.values()) as Transaction[];
-      finalTxList.sort((a, b) => b.createdAt - a.createdAt);
+    setIsInitialSync(true);
+    try {
+      setLoggedInUser(username);
+      localStorage.setItem('kuma_logged_in_user', username);
       
-      setTransactions(finalTxList);
-      localStorage.setItem('kuma_transactions', JSON.stringify(finalTxList));
-      addToast('ดึงข้อมูลบัญชีและซิงค์ข้อมูลเสร็จเรียบร้อยแล้วค้าบ! ✨🧸', 'success');
+      // Switch to the user's sync key
+      setSyncKey(userSyncKey);
+      localStorage.setItem('kuma_sync_key', userSyncKey);
       
-      // Update cloud with the merged dataset
-      await uploadTransactionsToCloud(userSyncKey, finalTxList);
-    } else {
-      // Cloud has no transactions. If we have local transactions, upload them!
-      const localTx = transactions || [];
-      if (localTx.length > 0) {
-        setTransactions(localTx);
-        localStorage.setItem('kuma_transactions', JSON.stringify(localTx));
-        await uploadTransactionsToCloud(userSyncKey, localTx);
-        addToast('ซิงค์ข้อมูลรายการของคุณขึ้นระบบคลาวด์เรียบร้อยแล้วครับ! 🧸☁️', 'success');
+      // Download cloud data for this key
+      setIsSyncing(true);
+      addToast('กำลังดึงข้อมูลกระเป๋าเงินของคุณจากระบบคลาวด์... 🧸☁️', 'info');
+      const downloadedTx = await downloadTransactionsFromCloud(userSyncKey);
+      const downloadedCats = await downloadCategoriesFromCloud(userSyncKey);
+      const downloadedTheme = await downloadThemeFromCloud(userSyncKey);
+      setIsSyncing(false);
+      
+      // 1. Recover/sync theme
+      if (downloadedTheme) {
+        setSelectedThemeId(downloadedTheme as ThemeType);
+        localStorage.setItem('kuma_theme', downloadedTheme);
       } else {
-        setTransactions([]);
-        localStorage.setItem('kuma_transactions', JSON.stringify([]));
-        addToast('ยินดีต้อนรับเข้าสู่ระบบบัญชีใหม่ครับ เริ่มต้นบันทึกรายวันกันเลย! 🧸✨', 'success');
+        // Back up current theme if they don't have one saved on cloud yet
+        const currentThemeId = localStorage.getItem('kuma_theme') || 'warm-rose';
+        await uploadThemeToCloud(userSyncKey, currentThemeId);
       }
-    }
 
-    // 3. Recover/sync categories
-    if (downloadedCats !== null) {
-      setIncomeCategories(downloadedCats.incomeCategories);
-      setExpenseCategories(downloadedCats.expenseCategories);
-      localStorage.setItem('kuma_income_categories', JSON.stringify(downloadedCats.incomeCategories));
-      localStorage.setItem('kuma_expense_categories', JSON.stringify(downloadedCats.expenseCategories));
-    } else {
-      // Back up current categories to this user's cloud profile
-      await uploadCategoriesToCloud(userSyncKey, incomeCategories, expenseCategories);
+      // 2. Recover/sync transactions using ID deduplication so guest/local data is merged
+      let finalTxList: Transaction[] = [];
+      if (downloadedTx !== null && downloadedTx.length > 0) {
+        const localTx = transactions || [];
+        const combined = [...downloadedTx, ...localTx];
+        const uniqueMap = new Map();
+        combined.forEach(t => {
+          if (!uniqueMap.has(t.id)) {
+            uniqueMap.set(t.id, t);
+          }
+        });
+        finalTxList = Array.from(uniqueMap.values()) as Transaction[];
+        finalTxList.sort((a, b) => b.createdAt - a.createdAt);
+        
+        setTransactions(finalTxList);
+        localStorage.setItem('kuma_transactions', JSON.stringify(finalTxList));
+        addToast('ดึงข้อมูลบัญชีและซิงค์ข้อมูลเสร็จเรียบร้อยแล้วค้าบ! ✨🧸', 'success');
+        
+        // Update cloud with the merged dataset
+        await uploadTransactionsToCloud(userSyncKey, finalTxList);
+      } else {
+        // Cloud has no transactions. If we have local transactions, upload them!
+        const localTx = transactions || [];
+        if (localTx.length > 0) {
+          setTransactions(localTx);
+          localStorage.setItem('kuma_transactions', JSON.stringify(localTx));
+          await uploadTransactionsToCloud(userSyncKey, localTx);
+          addToast('ซิงค์ข้อมูลรายการของคุณขึ้นระบบคลาวด์เรียบร้อยแล้วครับ! 🧸☁️', 'success');
+        } else {
+          setTransactions([]);
+          localStorage.setItem('kuma_transactions', JSON.stringify([]));
+          addToast('ยินดีต้อนรับเข้าสู่ระบบบัญชีใหม่ครับ เริ่มต้นบันทึกรายวันกันเลย! 🧸✨', 'success');
+        }
+      }
+
+      // 3. Recover/sync categories
+      if (downloadedCats !== null) {
+        setIncomeCategories(downloadedCats.incomeCategories);
+        setExpenseCategories(downloadedCats.expenseCategories);
+        localStorage.setItem('kuma_income_categories', JSON.stringify(downloadedCats.incomeCategories));
+        localStorage.setItem('kuma_expense_categories', JSON.stringify(downloadedCats.expenseCategories));
+      } else {
+        // Back up current categories to this user's cloud profile
+        await uploadCategoriesToCloud(userSyncKey, incomeCategories, expenseCategories);
+      }
+    } catch (error) {
+      console.error("Error during login sync:", error);
+      addToast('เกิดข้อผิดพลาดในการเชื่อมต่อคลาวด์คุมะคุงขออภัยด้วยนะค้าบ 🥺💧', 'error');
+    } finally {
+      setIsInitialSync(false);
+      setIsSyncing(false);
     }
   };
 
@@ -1180,6 +1190,34 @@ export default function App() {
       className={`min-h-screen font-sans pb-24 ${currentTheme.background} ${currentTheme.textPrimary}`}
     >
       
+      {/* Full-Screen Syncing Overlay */}
+      {isInitialSync && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[9999] flex flex-col items-center justify-center p-6 text-center text-white">
+          <div className="relative mb-6">
+            <div className="absolute inset-0 rounded-full bg-amber-500 blur-3xl opacity-30 animate-pulse" />
+            <img 
+              src="https://img.icons8.com/fluency/512/wallet.png" 
+              alt="Syncing" 
+              className="w-24 h-24 relative select-none animate-bounce"
+            />
+          </div>
+          <div className="space-y-3 max-w-sm">
+            <h3 className="text-xl font-extrabold flex items-center justify-center gap-2">
+              <span>กำลังดึงข้อมูลบัญชี... ☁️🧸</span>
+            </h3>
+            <p className="text-xs text-slate-300 font-medium leading-relaxed">
+              คุมะคุงกำลังดึงข้อมูลบัญชี รายการ และธีมที่คุณเคยทำไว้กลับมาจากคลาวด์อย่างปลอดภัยนะค้าบ... กรุณารอสักครู่น้า ✨
+            </p>
+            {/* Adorable custom bouncing dots spinner */}
+            <div className="flex justify-center items-center gap-1.5 pt-3">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-bounce [animation-delay:0.1s]" />
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-bounce [animation-delay:0.2s]" />
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-bounce [animation-delay:0.3s]" />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Dynamic Toast Container */}
       <ToastContainer toasts={toasts} onClose={removeToast} />
 
@@ -1266,12 +1304,43 @@ export default function App() {
         <div className={`p-4 rounded-3xl border transition-all flex items-center gap-3.5 relative overflow-hidden shadow-xs ${
           isDark ? 'bg-slate-900/40 border-slate-800' : `${currentTheme.cardBg} ${currentTheme.borderColor}`
         }`}>
-          {/* Pastel circular accent behind mascot */}
-          <div className={`absolute -left-1 -bottom-4 w-16 h-16 rounded-full blur-xl pointer-events-none ${
-            isDark ? 'bg-amber-400/5' : 'bg-[#8BA888]/10'
-          }`} />
+          {/* Pastel circular accent behind mascot (Dynamic glowing orb matching Kuma's mood) */}
+          <motion.div 
+            className="absolute -left-1 -bottom-4 w-16 h-16 rounded-full blur-xl pointer-events-none"
+            animate={
+              mascotReaction === 'happy' || mascotReaction === 'celebrate'
+                ? {
+                    scale: [1, 1.4, 1],
+                    opacity: [0.15, 0.4, 0.15],
+                    backgroundColor: isDark ? 'rgba(245, 158, 11, 0.25)' : 'rgba(245, 158, 11, 0.35)' // Golden Amber
+                  }
+                : mascotReaction === 'proud'
+                ? {
+                    scale: [1, 1.25, 1],
+                    opacity: [0.15, 0.3, 0.15],
+                    backgroundColor: isDark ? 'rgba(16, 185, 129, 0.2)' : 'rgba(16, 185, 129, 0.25)' // Emerald
+                  }
+                : mascotReaction === 'shocked'
+                ? {
+                    scale: [1, 1.6, 1],
+                    opacity: [0.25, 0.55, 0.25],
+                    backgroundColor: isDark ? 'rgba(239, 68, 68, 0.3)' : 'rgba(239, 68, 68, 0.4)' // Crimson/Red
+                  }
+                : {
+                    scale: [1, 1.15, 1],
+                    opacity: [0.1, 0.2, 0.1],
+                    backgroundColor: isDark ? 'rgba(251, 191, 36, 0.12)' : 'rgba(139, 168, 136, 0.25)' // Warm Theme Glow
+                  }
+            }
+            transition={{
+              repeat: Infinity,
+              duration: mascotReaction === 'shocked' ? 1.0 : mascotReaction === 'happy' ? 1.5 : 4,
+              ease: "easeInOut"
+            }}
+          />
           
           <motion.div
+            key={mascotReaction} // Forces animation to re-evaluate on reaction switch
             className="text-4xl shrink-0 select-none cursor-pointer"
             animate={
               mascotReaction === 'happy'
@@ -1299,14 +1368,16 @@ export default function App() {
                     rotate: [0, 10, -10, 10, 0]
                   }
                 : {
-                    y: [0, -4, 0]
+                    y: [0, -3, 0],
+                    scaleY: [1, 1.04, 1],
+                    scaleX: [1, 0.97, 1]
                   }
             }
             transition={
               mascotReaction === 'idle'
                 ? {
                     repeat: Infinity,
-                    duration: 3,
+                    duration: 3.2,
                     ease: "easeInOut"
                   }
                 : {
@@ -1324,7 +1395,17 @@ export default function App() {
           <div className="space-y-0.5">
             <span className="text-[9px] font-bold text-[#8BA888] dark:text-amber-400 uppercase tracking-widest">Kuma Assistant</span>
             <p className="text-xs font-semibold leading-relaxed text-slate-700 dark:text-slate-300">
-              "{mascotMessage}"
+              "
+              <motion.span
+                key={mascotMessage}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, ease: 'easeOut' }}
+                className="inline-block"
+              >
+                {mascotMessage}
+              </motion.span>
+              "
             </p>
           </div>
         </div>
@@ -1917,18 +1998,43 @@ export default function App() {
                           </div>
 
                           {/* Slip Image Thumbnail */}
-                          {t.slipImage && (
-                            <div className="flex items-center ml-auto mr-2 shrink-0">
-                              <button
-                                onClick={() => setSelectedSlipUrl(t.slipImage || null)}
-                                className="relative group w-8 h-10 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 transition-all active:scale-95 shadow-2xs hover:border-amber-400 hover:ring-2 hover:ring-amber-400/20"
-                                title="ดูรูปภาพสลิปที่แนบไว้"
-                              >
-                                <img src={t.slipImage} alt="slip thumbnail" className="w-full h-full object-cover" />
-                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                                  <Eye size={10} className="text-white" />
-                                </div>
-                              </button>
+                          {((t.slipImages && t.slipImages.length > 0) || t.slipImage) && (
+                            <div className="flex items-center gap-1 ml-auto mr-2 shrink-0">
+                              {(() => {
+                                const images = t.slipImages && t.slipImages.length > 0 
+                                  ? t.slipImages 
+                                  : t.slipImage 
+                                    ? [t.slipImage] 
+                                    : [];
+                                const maxVisible = 2;
+                                const extraCount = images.length - maxVisible;
+                                return (
+                                  <>
+                                    {images.slice(0, maxVisible).map((imgSrc, imgIdx) => {
+                                      const isLast = imgIdx === maxVisible - 1 && extraCount > 0;
+                                      return (
+                                        <button
+                                          key={imgIdx}
+                                          onClick={() => setSelectedSlipUrl(imgSrc)}
+                                          className="relative group w-8 h-10 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 transition-all active:scale-95 shadow-2xs hover:border-amber-400 hover:ring-2 hover:ring-amber-400/20"
+                                          title={`ดูรูปภาพสลิปที่ ${imgIdx + 1}`}
+                                        >
+                                          <img src={imgSrc} alt={`slip thumbnail ${imgIdx + 1}`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                          {isLast ? (
+                                            <div className="absolute inset-0 bg-black/75 flex items-center justify-center">
+                                              <span className="text-[10px] font-extrabold text-white">+{extraCount}</span>
+                                            </div>
+                                          ) : (
+                                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                              <Eye size={10} className="text-white" />
+                                            </div>
+                                          )}
+                                        </button>
+                                      );
+                                    })}
+                                  </>
+                                );
+                              })()}
                             </div>
                           )}
 
