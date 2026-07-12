@@ -21,7 +21,9 @@ import {
   loginUser,
   loginWithGoogle,
   uploadCategoriesToCloud,
-  downloadCategoriesFromCloud
+  downloadCategoriesFromCloud,
+  uploadThemeToCloud,
+  downloadThemeFromCloud
 } from './firebase';
 import { 
   Wallet, 
@@ -253,12 +255,6 @@ export default function App() {
     }, 5000);
   };
 
-  // Monthly Spending Budget state
-  const [monthlyBudget, setMonthlyBudget] = useState<number>(() => {
-    const stored = localStorage.getItem('kuma_monthly_budget');
-    return stored ? Number(stored) : 10000; // Default 10,000 Baht
-  });
-
   // State for displaying bank slip preview modal
   const [selectedSlipUrl, setSelectedSlipUrl] = useState<string | null>(null);
 
@@ -360,52 +356,88 @@ export default function App() {
     setSyncKey(userSyncKey);
     localStorage.setItem('kuma_sync_key', userSyncKey);
     
-    // Download cloud transactions for this key
+    // Download cloud data for this key
     setIsSyncing(true);
     addToast('กำลังดึงข้อมูลกระเป๋าเงินของคุณจากระบบคลาวด์... 🧸☁️', 'info');
     const downloadedTx = await downloadTransactionsFromCloud(userSyncKey);
     const downloadedCats = await downloadCategoriesFromCloud(userSyncKey);
+    const downloadedTheme = await downloadThemeFromCloud(userSyncKey);
     setIsSyncing(false);
     
-    if (downloadedTx !== null) {
-      setTransactions(downloadedTx);
-      localStorage.setItem('kuma_transactions', JSON.stringify(downloadedTx));
-      addToast('ดึงข้อมูลบัญชีของคุณเสร็จเรียบร้อยแล้วค้าบ! ✨🧸', 'success');
+    // 1. Recover/sync theme
+    if (downloadedTheme) {
+      setSelectedThemeId(downloadedTheme as ThemeType);
+      localStorage.setItem('kuma_theme', downloadedTheme);
     } else {
-      // If no data exists on cloud for this user yet, start with a clean slate
-      // Do NOT leak the previous guest's transactions!
-      setTransactions([]);
-      localStorage.setItem('kuma_transactions', JSON.stringify([]));
-      addToast('ยินดีต้อนรับเข้าสู่ระบบบัญชีใหม่ครับ เริ่มต้นบันทึกรายวันกันเลย! 🧸✨', 'success');
+      // Back up current theme if they don't have one saved on cloud yet
+      const currentThemeId = localStorage.getItem('kuma_theme') || 'warm-rose';
+      await uploadThemeToCloud(userSyncKey, currentThemeId);
     }
 
+    // 2. Recover/sync transactions using ID deduplication so guest/local data is merged
+    let finalTxList: Transaction[] = [];
+    if (downloadedTx !== null && downloadedTx.length > 0) {
+      const localTx = transactions || [];
+      const combined = [...downloadedTx, ...localTx];
+      const uniqueMap = new Map();
+      combined.forEach(t => {
+        if (!uniqueMap.has(t.id)) {
+          uniqueMap.set(t.id, t);
+        }
+      });
+      finalTxList = Array.from(uniqueMap.values()) as Transaction[];
+      finalTxList.sort((a, b) => b.createdAt - a.createdAt);
+      
+      setTransactions(finalTxList);
+      localStorage.setItem('kuma_transactions', JSON.stringify(finalTxList));
+      addToast('ดึงข้อมูลบัญชีและซิงค์ข้อมูลเสร็จเรียบร้อยแล้วค้าบ! ✨🧸', 'success');
+      
+      // Update cloud with the merged dataset
+      await uploadTransactionsToCloud(userSyncKey, finalTxList);
+    } else {
+      // Cloud has no transactions. If we have local transactions, upload them!
+      const localTx = transactions || [];
+      if (localTx.length > 0) {
+        setTransactions(localTx);
+        localStorage.setItem('kuma_transactions', JSON.stringify(localTx));
+        await uploadTransactionsToCloud(userSyncKey, localTx);
+        addToast('ซิงค์ข้อมูลรายการของคุณขึ้นระบบคลาวด์เรียบร้อยแล้วครับ! 🧸☁️', 'success');
+      } else {
+        setTransactions([]);
+        localStorage.setItem('kuma_transactions', JSON.stringify([]));
+        addToast('ยินดีต้อนรับเข้าสู่ระบบบัญชีใหม่ครับ เริ่มต้นบันทึกรายวันกันเลย! 🧸✨', 'success');
+      }
+    }
+
+    // 3. Recover/sync categories
     if (downloadedCats !== null) {
       setIncomeCategories(downloadedCats.incomeCategories);
       setExpenseCategories(downloadedCats.expenseCategories);
       localStorage.setItem('kuma_income_categories', JSON.stringify(downloadedCats.incomeCategories));
       localStorage.setItem('kuma_expense_categories', JSON.stringify(downloadedCats.expenseCategories));
     } else {
-      // Back up current guest categories to this new user's cloud profile
+      // Back up current categories to this user's cloud profile
       await uploadCategoriesToCloud(userSyncKey, incomeCategories, expenseCategories);
     }
   };
 
   const handleSignupSuccess = async (username: string, userSyncKey: string) => {
-    setLoggedInUser(username);
-    localStorage.setItem('kuma_logged_in_user', username);
-    
-    // Switch to the user's sync key (which might be new or existing)
-    setSyncKey(userSyncKey);
-    localStorage.setItem('kuma_sync_key', userSyncKey);
-    
-    // Always start with a completely fresh slate on signup as requested!
-    setTransactions([]);
-    localStorage.setItem('kuma_transactions', JSON.stringify([]));
-    
-    // Trigger backup of empty transactions immediately to make sure they are saved on their new syncKey!
-    await triggerAutoCloudBackup([]);
-    // Backup categories too
+    // Initialize cloud profile on their new syncKey with clean transactions
+    // and customized/default categories to ensure it's ready when they log in!
+    await uploadTransactionsToCloud(userSyncKey, []);
     await uploadCategoriesToCloud(userSyncKey, incomeCategories, expenseCategories);
+    
+    // Show success popup and redirect to login page
+    showConfirm(
+      'สมัครสมาชิกสำเร็จ 🎉',
+      'สมัครสมาชิกเรียบร้อยแล้วครับ! กรุณาเข้าสู่ระบบด้วยชื่อผู้ใช้งานและรหัสผ่านที่คุณตั้งไว้ เพื่อเริ่มต้นใช้งานกระเป๋าเงิน CashSniper นะครับ 🧸💼',
+      () => {
+        setAuthPassword(''); // Clear password
+        setAuthTab('login'); // Redirect to login tab
+      },
+      'เข้าสู่ระบบ',
+      '' // Empty cancel text hides the cancel button!
+    );
   };
 
   const handleLogout = () => {
@@ -512,38 +544,10 @@ export default function App() {
           );
         }
       } else {
-        // Expense budget check
-        const currentMonthPrefix = newTx.date.substring(0, 7);
-        let currentMonthExpenses = 0;
-        updated.forEach(t => {
-          if (t.type === 'expense' && t.date.startsWith(currentMonthPrefix)) {
-            currentMonthExpenses += t.amount;
-          }
-        });
-
-        if (monthlyBudget > 0) {
-          if (currentMonthExpenses > monthlyBudget) {
-            triggerMascotReaction(
-              'shocked',
-              `เตือนภัยครับคุมะ! ⚠️ ยอดรายจ่ายรวม ฿${currentMonthExpenses.toLocaleString()} ทะลุงบที่ตั้งไว้ (฿${monthlyBudget.toLocaleString()}) แล้วน้า 🥺💧 เดือนนี้รัดเข็มขัดกันนิดนึงนะครับ`
-            );
-          } else if (currentMonthExpenses > monthlyBudget * 0.8) {
-            triggerMascotReaction(
-              'shocked',
-              `ระวังน้า! ⚠️ รายจ่ายรวมใช้ไปกว่า 80% ของงบแล้วนะครับ (฿${currentMonthExpenses.toLocaleString()} / ฿${monthlyBudget.toLocaleString()}) ค่อยๆ จ่ายน้า 🧸💧`
-            );
-          } else {
-            triggerMascotReaction(
-              'proud',
-              `เยี่ยมสุดๆ คุมะขอคารวะ! 🕶️🧸 รายจ่ายรวมเดือนนี้ยังอยู่ภายใต้งบประมาณ (เหลือช้อปได้อีก ฿${(monthlyBudget - currentMonthExpenses).toLocaleString()}) เก่งที่สู้ดดด!`
-            );
-          }
-        } else {
-          triggerMascotReaction(
-            'happy',
-            `จดรายจ่ายเรียบร้อย ฿${newTx.amount.toLocaleString()} ครับ คุมะคุงบันทึกใส่สมุดบัญชีแล้วน้า 🧸📝`
-          );
-        }
+        triggerMascotReaction(
+          'happy',
+          `จดรายจ่ายเรียบร้อย ฿${newTx.amount.toLocaleString()} ครับ คุมะคุงบันทึกใส่สมุดบัญชีแล้วน้า 🧸📝`
+        );
       }
     }
 
@@ -586,10 +590,15 @@ export default function App() {
   };
 
   // --- Theme customization callback ---
-  const handleThemeChange = (themeId: ThemeType) => {
+  const handleThemeChange = async (themeId: ThemeType) => {
     setSelectedThemeId(themeId);
     localStorage.setItem('kuma_theme', themeId);
     addToast(`เปลี่ยนธีมเป็น "${APP_THEMES.find(t => t.id === themeId)?.name}" แล้วน่ารักขึ้น 300% 🌸✨`);
+    
+    // Auto-save selected theme to cloud if synced/logged in
+    if (syncKey) {
+      await uploadThemeToCloud(syncKey, themeId);
+    }
   };
 
   // --- Category change callback ---
@@ -1048,7 +1057,7 @@ export default function App() {
                   value={authUsername}
                   onChange={(e) => setAuthUsername(e.target.value)}
                   disabled={isAuthLoading}
-                  placeholder="ภาษาอังกฤษและตัวเลขเท่านั้น (เช่น cash_user)"
+                  placeholder="ภาษาอังกฤษและตัวเลขเท่านั้น"
                   className={`w-full pl-9 pr-4 py-2.5 rounded-2xl text-xs font-semibold border transition-all focus:outline-hidden ${
                     isDark
                       ? 'bg-slate-950 border-slate-800 text-white focus:border-amber-400/50'
@@ -1405,62 +1414,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Interactive Budget Progress Card */}
-            {monthlyBudget > 0 && (
-              <div className={`p-4 rounded-3xl border transition-all ${
-                isDark ? 'bg-slate-900/40 border-slate-900' : 'bg-white border-slate-100 shadow-xs'
-              }`}>
-                <div className="flex justify-between items-center mb-2">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-lg select-none">📊</span>
-                    <span className={`text-xs font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                      สถานะงบประมาณเดือนนี้
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-slate-400 font-bold">
-                    งบ ฿{monthlyBudget.toLocaleString()}
-                  </span>
-                </div>
-
-                {/* Progress bar container */}
-                <div className="w-full h-3 bg-slate-100 dark:bg-slate-950 rounded-full overflow-hidden mb-2 relative">
-                  <div
-                    className={`h-full rounded-full transition-all duration-500 ${
-                      summaryTotals.expense > monthlyBudget
-                        ? 'bg-gradient-to-r from-red-400 to-red-500 animate-pulse'
-                        : summaryTotals.expense > monthlyBudget * 0.8
-                          ? 'bg-gradient-to-r from-amber-400 to-amber-500'
-                          : 'bg-gradient-to-r from-emerald-400 to-emerald-500'
-                    }`}
-                    style={{
-                      width: `${Math.min(100, (summaryTotals.expense / monthlyBudget) * 100)}%`
-                    }}
-                  />
-                </div>
-
-                <div className="flex justify-between items-center text-[10px] font-bold">
-                  <span className={`${
-                    summaryTotals.expense > monthlyBudget
-                      ? 'text-red-500'
-                      : summaryTotals.expense > monthlyBudget * 0.8
-                        ? 'text-amber-500'
-                        : 'text-slate-400'
-                  }`}>
-                    ใช้ไปแล้ว ฿{summaryTotals.expense.toLocaleString()} ({Math.round((summaryTotals.expense / monthlyBudget) * 100)}%)
-                  </span>
-                  <span className={`${
-                    monthlyBudget - summaryTotals.expense >= 0
-                      ? 'text-emerald-500'
-                      : 'text-red-500'
-                  }`}>
-                    {monthlyBudget - summaryTotals.expense >= 0
-                      ? `เหลือใช้ได้อีก ฿${(monthlyBudget - summaryTotals.expense).toLocaleString()}`
-                      : `ใช้เกินงบไปแล้ว ฿${Math.abs(monthlyBudget - summaryTotals.expense).toLocaleString()} ⚠️`}
-                  </span>
-                </div>
-              </div>
-            )}
-
             {/* View mode switcher */}
             <div className={`p-1 rounded-2xl border flex mb-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-100'}`}>
               <button
@@ -1683,7 +1636,7 @@ export default function App() {
                     </span>
                     <input
                       type="text"
-                      placeholder="ค้นหา เช่น ค่ากาแฟ, ท่องเที่ยว..."
+                      placeholder="ค้นหารายการ..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className={`block w-full pl-9 pr-8 py-2 text-xs font-medium rounded-xl border focus:outline-none ${
@@ -2301,46 +2254,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 1.5. Monthly Budget Limit Card */}
-            <div className={`p-4 rounded-3xl border transition-all ${
-              isDark ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-100 shadow-sm'
-            }`}>
-              <div className="flex items-center gap-2 mb-3">
-                <div className={`p-2 rounded-xl ${isDark ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-500'}`}>
-                  <Wallet size={16} />
-                </div>
-                <div>
-                  <h3 className={`text-sm font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                    ตั้งงบประมาณรายเดือน (Monthly Budget)
-                  </h3>
-                  <p className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
-                    ควบคุมรายจ่ายของเดือน ไม่ให้ฟุ่มเฟือยเกินตัวนะคุมะ
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-slate-500">฿</span>
-                <input
-                  type="number"
-                  value={monthlyBudget === 0 ? '' : monthlyBudget}
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
-                    setMonthlyBudget(val);
-                    localStorage.setItem('kuma_monthly_budget', String(val));
-                  }}
-                  placeholder="กรอกงบประมาณ (เช่น 10000)"
-                  className={`w-full px-3 py-2 rounded-2xl text-xs font-bold border transition-all focus:outline-hidden ${
-                    isDark
-                      ? 'bg-slate-950 border-slate-800 text-white focus:border-emerald-400/50'
-                      : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-emerald-400/50 focus:bg-white'
-                  }`}
-                />
-              </div>
-              <p className="text-[10px] text-slate-400 font-semibold mt-2">
-                💡 เมื่อจดรายจ่ายใหม่ คุมะคุงจะช่วยเช็คโดยอัตโนมัติว่ายังปลอดภัยและอยู่ภายใต้งบนี้หรือไม่ครับ!
-              </p>
-            </div>
 
             {/* Category Customization Manager */}
             <CategoryManager
@@ -2502,16 +2415,18 @@ export default function App() {
             </div>
             
             <div className="flex gap-2 pt-2">
-              <button
-                onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
-                className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
-                  isDark 
-                    ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' 
-                    : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                {confirmDialog.cancelText}
-              </button>
+              {confirmDialog.cancelText && (
+                <button
+                  onClick={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
+                    isDark 
+                      ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700' 
+                      : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {confirmDialog.cancelText}
+                </button>
+              )}
               <button
                 onClick={confirmDialog.onConfirm}
                 className={`flex-1 py-2 px-3 rounded-xl text-xs font-extrabold text-white transition-all active:scale-95 ${

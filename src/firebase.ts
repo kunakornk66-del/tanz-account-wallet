@@ -129,6 +129,41 @@ export async function uploadCategoriesToCloud(
   }
 }
 
+// Upload selected theme to Cloud under a specific Sync Key
+export async function uploadThemeToCloud(syncKey: string, themeId: string): Promise<boolean> {
+  try {
+    const key = syncKey.toUpperCase();
+    const profileRef = doc(db, 'sync_profiles', key);
+    await setDoc(profileRef, {
+      themeId: themeId,
+      lastSyncedAt: Date.now()
+    }, { merge: true });
+    return true;
+  } catch (error) {
+    console.error("Error uploading theme:", error);
+    return false;
+  }
+}
+
+// Download selected theme from Cloud under a specific Sync Key
+export async function downloadThemeFromCloud(syncKey: string): Promise<string | null> {
+  try {
+    const key = syncKey.toUpperCase();
+    const profileRef = doc(db, 'sync_profiles', key);
+    const snap = await getDoc(profileRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      if (data.themeId) {
+        return data.themeId as string;
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error("Error downloading theme:", error);
+    return null;
+  }
+}
+
 // Download customized categories from Cloud under a specific Sync Key
 export async function downloadCategoriesFromCloud(syncKey: string): Promise<{ incomeCategories: any[], expenseCategories: any[] } | null> {
   try {

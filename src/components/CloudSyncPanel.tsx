@@ -155,7 +155,7 @@ export const CloudSyncPanel: React.FC<CloudSyncPanelProps> = ({
             <div className="flex gap-2">
               <input
                 type="text"
-                placeholder="เช่น KUMA-ABCD-1234"
+                placeholder=""
                 value={inputKey}
                 onChange={(e) => setInputKey(e.target.value.toUpperCase())}
                 className={`flex-1 px-3 py-2 text-xs font-mono font-bold rounded-xl border focus:outline-none ${

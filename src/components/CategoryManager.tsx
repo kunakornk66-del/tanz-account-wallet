@@ -428,7 +428,7 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({
                   <div className="flex gap-1.5 mt-2 pt-1.5 border-t border-slate-100 dark:border-slate-900">
                     <input
                       type="text"
-                      placeholder="ใส่หมวดย่อยใหม่ เช่น พ่อ, แม่, ลูก..."
+                      placeholder=""
                       value={newSubNameMap[cat.id] || ''}
                       onChange={(e) => setNewSubNameMap(prev => ({ ...prev, [cat.id]: e.target.value }))}
                       onKeyDown={(e) => {
@@ -529,7 +529,7 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({
               </label>
               <input
                 type="text"
-                placeholder="ป้อนชื่อ เช่น ท่องเที่ยวต่างประเทศ, ครอบครัว"
+                placeholder=""
                 value={newCatName}
                 onChange={(e) => setNewCatName(e.target.value)}
                 className={`w-full px-3 py-2 rounded-xl text-xs font-bold border focus:outline-none ${

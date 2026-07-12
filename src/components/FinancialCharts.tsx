@@ -425,7 +425,7 @@ export const FinancialCharts: React.FC<FinancialChartsProps> = ({
             <span className="text-2xl select-none">🧸🧁</span>
             <p className="text-[10px] text-slate-400 font-bold mt-1.5 leading-relaxed">
               ยังไม่มีข้อมูลหมวดย่อยในเดือนนี้ครับ<br />
-              เมื่อคุณจดรายการและเลือกหมวดย่อย เช่น "พ่อ", "แม่" หรือ "ลูก"<br />
+              เมื่อคุณจดรายการและเลือกระบุหมวดย่อย<br />
               ข้อมูลจัดอันดับและสถิติจะแสดงขึ้นที่นี่ทันทีเลยน้า!
             </p>
           </div>

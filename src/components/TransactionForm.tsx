@@ -405,7 +405,7 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="รายละเอียด เช่น ข้าวกระเพราไข่ดาว, ค่ากาแฟ"
+            placeholder=""
             className={`block w-full pl-9 pr-3 py-2.5 rounded-xl text-xs font-medium border focus:outline-none transition-all ${
               isDark
                 ? 'bg-slate-800 border-slate-700 text-white focus:border-amber-500'
