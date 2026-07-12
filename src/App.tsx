@@ -67,9 +67,18 @@ const INITIAL_TRANSACTIONS: Transaction[] = [];
 
 export default function App() {
   // --- Core Application States ---
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [incomeCategories, setIncomeCategories] = useState<CategoryInfo[]>([]);
-  const [expenseCategories, setExpenseCategories] = useState<CategoryInfo[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>(() => {
+    const stored = localStorage.getItem('kuma_transactions');
+    return stored ? JSON.parse(stored) : INITIAL_TRANSACTIONS;
+  });
+  const [incomeCategories, setIncomeCategories] = useState<CategoryInfo[]>(() => {
+    const stored = localStorage.getItem('kuma_income_categories');
+    return stored ? JSON.parse(stored) : INCOME_CATEGORIES;
+  });
+  const [expenseCategories, setExpenseCategories] = useState<CategoryInfo[]>(() => {
+    const stored = localStorage.getItem('kuma_expense_categories');
+    return stored ? JSON.parse(stored) : EXPENSE_CATEGORIES;
+  });
 
   const getCategoryDetailsDynamic = (id: string, type: 'income' | 'expense') => {
     const list = type === 'income' ? incomeCategories : expenseCategories;
@@ -86,12 +95,21 @@ export default function App() {
   };
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'add' | 'stats' | 'settings'>('dashboard');
-  const [selectedThemeId, setSelectedThemeId] = useState<ThemeType>('cherry');
-  const [syncKey, setSyncKey] = useState<string>('');
-  const [lastSyncedAt, setLastSyncedAt] = useState<number>(0);
+  const [selectedThemeId, setSelectedThemeId] = useState<ThemeType>(() => {
+    return (localStorage.getItem('kuma_theme') as ThemeType) || 'cherry';
+  });
+  const [syncKey, setSyncKey] = useState<string>(() => {
+    return localStorage.getItem('kuma_sync_key') || '';
+  });
+  const [lastSyncedAt, setLastSyncedAt] = useState<number>(() => {
+    const stored = localStorage.getItem('kuma_last_synced');
+    return stored ? parseInt(stored) : 0;
+  });
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [isInitialSync, setIsInitialSync] = useState<boolean>(false);
-  const [loggedInUser, setLoggedInUser] = useState<string | null>(null);
+  const [loggedInUser, setLoggedInUser] = useState<string | null>(() => {
+    return localStorage.getItem('kuma_logged_in_user');
+  });
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
 
   // Full screen Login/Signup states for initial lock
@@ -359,18 +377,50 @@ export default function App() {
       setSyncKey(userSyncKey);
       localStorage.setItem('kuma_sync_key', userSyncKey);
       
-      // Download cloud data for this key
+      // Download cloud data for this key with a timeout
       setIsSyncing(true);
       addToast('กำลังดึงข้อมูลกระเป๋าเงินของคุณจากระบบคลาวด์... 🧸☁️', 'info');
-      const downloadedTx = await downloadTransactionsFromCloud(userSyncKey);
-      const downloadedCats = await downloadCategoriesFromCloud(userSyncKey);
-      const downloadedTheme = await downloadThemeFromCloud(userSyncKey);
+      
+      const timeoutMs = 4500; // 4.5s is standard to avoid feeling stuck
+      
+      const txPromise = downloadTransactionsFromCloud(userSyncKey);
+      const catsPromise = downloadCategoriesFromCloud(userSyncKey);
+      const themePromise = downloadThemeFromCloud(userSyncKey);
+
+      const downloadedTx = await Promise.race([
+        txPromise,
+        new Promise<string>((resolve) => setTimeout(() => resolve('TIMEOUT'), timeoutMs))
+      ]);
+
+      const downloadedCats = await Promise.race([
+        catsPromise,
+        new Promise<string>((resolve) => setTimeout(() => resolve('TIMEOUT'), timeoutMs))
+      ]);
+
+      const downloadedTheme = await Promise.race([
+        themePromise,
+        new Promise<string>((resolve) => setTimeout(() => resolve('TIMEOUT'), timeoutMs))
+      ]);
+      
       setIsSyncing(false);
+
+      const isTimeout = downloadedTx === 'TIMEOUT' || downloadedCats === 'TIMEOUT' || downloadedTheme === 'TIMEOUT';
+
+      if (isTimeout) {
+        addToast('⚡ เชื่อมต่อระบบคลาวด์ล่าช้า คุมะคุงขอเข้าใช้งานแบบออฟไลน์ให้ก่อนนะครับ ไม่ต้องห่วง ข้อมูลปลอดภัยในระบบแน่นอนครับ! 🧸💼☁️', 'sync');
+        setIsInitialSync(false);
+        setIsSyncing(false);
+        return;
+      }
+
+      const finalTx = downloadedTx as Transaction[] | null;
+      const finalCats = downloadedCats as { incomeCategories: any[], expenseCategories: any[] } | null;
+      const finalTheme = downloadedTheme as string | null;
       
       // 1. Recover/sync theme
-      if (downloadedTheme) {
-        setSelectedThemeId(downloadedTheme as ThemeType);
-        localStorage.setItem('kuma_theme', downloadedTheme);
+      if (finalTheme) {
+        setSelectedThemeId(finalTheme as ThemeType);
+        localStorage.setItem('kuma_theme', finalTheme);
       } else {
         // Back up current theme if they don't have one saved on cloud yet
         const currentThemeId = localStorage.getItem('kuma_theme') || 'warm-rose';
@@ -379,9 +429,9 @@ export default function App() {
 
       // 2. Recover/sync transactions using ID deduplication so guest/local data is merged
       let finalTxList: Transaction[] = [];
-      if (downloadedTx !== null && downloadedTx.length > 0) {
+      if (finalTx !== null && finalTx.length > 0) {
         const localTx = transactions || [];
-        const combined = [...downloadedTx, ...localTx];
+        const combined = [...finalTx, ...localTx];
         const uniqueMap = new Map();
         combined.forEach(t => {
           if (!uniqueMap.has(t.id)) {
@@ -413,11 +463,11 @@ export default function App() {
       }
 
       // 3. Recover/sync categories
-      if (downloadedCats !== null) {
-        setIncomeCategories(downloadedCats.incomeCategories);
-        setExpenseCategories(downloadedCats.expenseCategories);
-        localStorage.setItem('kuma_income_categories', JSON.stringify(downloadedCats.incomeCategories));
-        localStorage.setItem('kuma_expense_categories', JSON.stringify(downloadedCats.expenseCategories));
+      if (finalCats !== null) {
+        setIncomeCategories(finalCats.incomeCategories);
+        setExpenseCategories(finalCats.expenseCategories);
+        localStorage.setItem('kuma_income_categories', JSON.stringify(finalCats.incomeCategories));
+        localStorage.setItem('kuma_expense_categories', JSON.stringify(finalCats.expenseCategories));
       } else {
         // Back up current categories to this user's cloud profile
         await uploadCategoriesToCloud(userSyncKey, incomeCategories, expenseCategories);
@@ -645,41 +695,62 @@ export default function App() {
     setIsSyncing(true);
     addToast('กำลังเชื่อมต่อฐานข้อมูลคลาวด์... 🔍', 'sync');
     
-    const keyExists = await verifySyncKey(targetKey);
-    if (!keyExists) {
-      addToast('❌ ไม่พบรหัสซิงค์นี้ในระบบคลาวด์ กรุณาตรวจสอบอีกครั้ง', 'error');
-      setIsSyncing(false);
-      return false;
-    }
+    const timeoutMs = 5000; // 5 seconds timeout
+    
+    try {
+      const keyExists = await Promise.race([
+        verifySyncKey(targetKey),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs))
+      ]);
 
-    const fetchedTx = await downloadTransactionsFromCloud(targetKey);
-    const fetchedCats = await downloadCategoriesFromCloud(targetKey);
-    setIsSyncing(false);
-
-    if (fetchedTx !== null) {
-      // Save
-      setTransactions(fetchedTx);
-      localStorage.setItem('kuma_transactions', JSON.stringify(fetchedTx));
-      
-      if (fetchedCats) {
-        setIncomeCategories(fetchedCats.incomeCategories);
-        setExpenseCategories(fetchedCats.expenseCategories);
-        localStorage.setItem('kuma_income_categories', JSON.stringify(fetchedCats.incomeCategories));
-        localStorage.setItem('kuma_expense_categories', JSON.stringify(fetchedCats.expenseCategories));
+      if (!keyExists) {
+        addToast('❌ เชื่อมต่อล่าช้าหรือรหัสซิงค์ไม่ถูกต้อง กรุณาลองใหม่อีกครั้งครับ', 'error');
+        setIsSyncing(false);
+        return false;
       }
-      
-      // Update local keys
-      setSyncKey(targetKey);
-      localStorage.setItem('kuma_sync_key', targetKey);
-      
-      const now = Date.now();
-      setLastSyncedAt(now);
-      localStorage.setItem('kuma_last_synced', now.toString());
 
-      addToast('🎉 ยินดีด้วย! ซิงค์และกู้คืนข้อมูลบัญชีสำเร็จ เรียบร้อยแล้วค่ะ!', 'success');
-      return true;
-    } else {
+      const fetchedTx = await Promise.race([
+        downloadTransactionsFromCloud(targetKey),
+        new Promise<any[] | null>((resolve) => setTimeout(() => resolve(null), timeoutMs))
+      ]);
+
+      const fetchedCats = await Promise.race([
+        downloadCategoriesFromCloud(targetKey),
+        new Promise<any>((resolve) => setTimeout(() => resolve(null), timeoutMs))
+      ]);
+      
+      setIsSyncing(false);
+
+      if (fetchedTx !== null) {
+        // Save
+        setTransactions(fetchedTx);
+        localStorage.setItem('kuma_transactions', JSON.stringify(fetchedTx));
+        
+        if (fetchedCats) {
+          setIncomeCategories(fetchedCats.incomeCategories);
+          setExpenseCategories(fetchedCats.expenseCategories);
+          localStorage.setItem('kuma_income_categories', JSON.stringify(fetchedCats.incomeCategories));
+          localStorage.setItem('kuma_expense_categories', JSON.stringify(fetchedCats.expenseCategories));
+        }
+        
+        // Update local keys
+        setSyncKey(targetKey);
+        localStorage.setItem('kuma_sync_key', targetKey);
+        
+        const now = Date.now();
+        setLastSyncedAt(now);
+        localStorage.setItem('kuma_last_synced', now.toString());
+
+        addToast('🎉 ยินดีด้วย! ซิงค์และกู้คืนข้อมูลบัญชีสำเร็จ เรียบร้อยแล้วค่ะ!', 'success');
+        return true;
+      } else {
+        addToast('❌ เชื่อมต่อล่าช้าหรือมีข้อผิดพลาดในการดาวน์โหลดข้อมูล', 'error');
+        return false;
+      }
+    } catch (e) {
+      console.error(e);
       addToast('❌ มีข้อผิดพลาดในการดาวน์โหลดข้อมูล', 'error');
+      setIsSyncing(false);
       return false;
     }
   };
@@ -914,8 +985,18 @@ export default function App() {
 
     setIsAuthLoading(true);
     try {
+      const timeoutMs = 6000; // 6 seconds timeout for server handshake
+      
       if (authTab === 'login') {
-        const result = await loginUser(authUsername, authPassword);
+        const authPromise = loginUser(authUsername, authPassword);
+        const result = await Promise.race([
+          authPromise,
+          new Promise<any>((resolve) => setTimeout(() => resolve({
+            success: false,
+            message: '⏱️ เชื่อมต่อเซิร์ฟเวอร์คลาวด์ล่าช้า กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่อีกครั้งนะค้าบ 🧸'
+          }), timeoutMs))
+        ]);
+
         if (result.success && result.username && result.syncKey) {
           addToast(result.message, 'success');
           handleLoginSuccess(result.username, result.syncKey);
@@ -924,7 +1005,15 @@ export default function App() {
         }
       } else {
         // Sign Up
-        const result = await signUpUser(authUsername, authPassword, syncKey);
+        const authPromise = signUpUser(authUsername, authPassword, syncKey);
+        const result = await Promise.race([
+          authPromise,
+          new Promise<any>((resolve) => setTimeout(() => resolve({
+            success: false,
+            message: '⏱️ เชื่อมต่อเซิร์ฟเวอร์คลาวด์ล่าช้า กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่อีกครั้งนะค้าบ 🧸'
+          }), timeoutMs))
+        ]);
+
         if (result.success && result.username && result.syncKey) {
           addToast(result.message, 'success');
           handleSignupSuccess(result.username, result.syncKey);
@@ -943,7 +1032,17 @@ export default function App() {
   const handleAuthGoogleSignIn = async () => {
     setIsAuthLoading(true);
     try {
-      const result = await loginWithGoogle(syncKey);
+      const timeoutMs = 15000; // Allow 15 seconds for Google account selection popup
+      const googleAuthPromise = loginWithGoogle(syncKey);
+      
+      const result = await Promise.race([
+        googleAuthPromise,
+        new Promise<any>((resolve) => setTimeout(() => resolve({
+          success: false,
+          message: '⏱️ หน้าต่างเลือกบัญชี Google ทำงานล่าช้า กรุณาเปิดแอปในแท็บใหม่เพื่อแก้ไขปัญหาระบบความปลอดภัยของ iFrame นะครับ 🧸'
+        }), timeoutMs))
+      ]);
+
       if (result.success && result.username && result.syncKey) {
         addToast(result.message, 'success');
         handleLoginSuccess(result.username, result.syncKey);
