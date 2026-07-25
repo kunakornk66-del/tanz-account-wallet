@@ -420,6 +420,11 @@ export default function App() {
   // --- Custom Authentication Handlers ---
   const handleLoginSuccess = async (username: string, userSyncKey: string) => {
     setIsInitialSync(true);
+    // Clear login inputs
+    setAuthUsername('');
+    setAuthPassword('');
+    setShowAuthPassword(false);
+
     try {
       setLoggedInUser(username);
       localStorage.setItem('kuma_logged_in_user', username);
@@ -558,6 +563,12 @@ export default function App() {
       () => {
         setLoggedInUser(null);
         localStorage.removeItem('kuma_logged_in_user');
+        
+        // Clear login form fields so username and password are not cached
+        setAuthUsername('');
+        setAuthPassword('');
+        setShowAuthPassword(false);
+        setAuthTab('login');
         
         // Generate a new clean anonymous sync key
         const newAnonymousKey = generateSyncKey();

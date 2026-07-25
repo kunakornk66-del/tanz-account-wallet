@@ -29,6 +29,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   if (!isOpen) return null;
 
+  const handleClose = () => {
+    setUsername('');
+    setPassword('');
+    setShowPassword(false);
+    onClose();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim() || !password) {
@@ -43,6 +50,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         if (result.success && result.username && result.syncKey) {
           addToast(result.message, 'success');
           onLoginSuccess(result.username, result.syncKey);
+          setUsername('');
+          setPassword('');
+          setShowPassword(false);
           onClose();
         } else {
           addToast(result.message || 'เข้าสู่ระบบไม่สำเร็จครับ 🥺', 'error');
@@ -53,6 +63,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         if (result.success && result.username && result.syncKey) {
           addToast(result.message, 'success');
           onSignupSuccess(result.username, result.syncKey);
+          setUsername('');
+          setPassword('');
+          setShowPassword(false);
           onClose();
         } else {
           addToast(result.message || 'สมัครสมาชิกไม่สำเร็จครับ 🥺', 'error');
@@ -78,7 +91,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       >
         {/* Close Button */}
         <button
-          onClick={onClose}
+          onClick={handleClose}
           className={`absolute top-4 right-4 p-1.5 rounded-full transition-colors ${
             isDark ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-100 text-slate-500'
           }`}
