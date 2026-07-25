@@ -118,6 +118,17 @@ export default function App() {
   const [authPassword, setAuthPassword] = useState('');
   const [showAuthPassword, setShowAuthPassword] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
+  const [authKey, setAuthKey] = useState<number>(0);
+
+  // Clear auth inputs whenever loggedOut state changes
+  useEffect(() => {
+    if (!loggedInUser) {
+      setAuthUsername('');
+      setAuthPassword('');
+      setShowAuthPassword(false);
+      setAuthKey(prev => prev + 1);
+    }
+  }, [loggedInUser]);
   
   // Filtering states
   const [selectedMonth, setSelectedMonth] = useState<string>(() => {
@@ -420,10 +431,11 @@ export default function App() {
   // --- Custom Authentication Handlers ---
   const handleLoginSuccess = async (username: string, userSyncKey: string) => {
     setIsInitialSync(true);
-    // Clear login inputs
+    // Clear login inputs and increment auth key
     setAuthUsername('');
     setAuthPassword('');
     setShowAuthPassword(false);
+    setAuthKey(prev => prev + 1);
 
     try {
       setLoggedInUser(username);
@@ -569,6 +581,7 @@ export default function App() {
         setAuthPassword('');
         setShowAuthPassword(false);
         setAuthTab('login');
+        setAuthKey(prev => prev + 1);
         
         // Generate a new clean anonymous sync key
         const newAnonymousKey = generateSyncKey();
@@ -1412,7 +1425,7 @@ export default function App() {
           </div>
 
           {/* Form */}
-          <form onSubmit={handleAuthSubmit} className="space-y-4">
+          <form key={`auth-form-${authKey}`} onSubmit={handleAuthSubmit} className="space-y-4" autoComplete="off">
             {/* Username */}
             <div className="space-y-1.5">
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
@@ -1424,6 +1437,8 @@ export default function App() {
                 </span>
                 <input
                   type="text"
+                  name="username"
+                  autoComplete="off"
                   value={authUsername}
                   onChange={(e) => setAuthUsername(e.target.value)}
                   disabled={isAuthLoading}
@@ -1453,6 +1468,8 @@ export default function App() {
                 </span>
                 <input
                   type={showAuthPassword ? 'text' : 'password'}
+                  name="password"
+                  autoComplete="new-password"
                   value={authPassword}
                   onChange={(e) => setAuthPassword(e.target.value)}
                   disabled={isAuthLoading}

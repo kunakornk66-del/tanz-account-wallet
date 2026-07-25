@@ -27,6 +27,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
+  React.useEffect(() => {
+    if (isOpen) {
+      setUsername('');
+      setPassword('');
+      setShowPassword(false);
+    }
+  }, [isOpen, activeTab]);
+
   if (!isOpen) return null;
 
   const handleClose = () => {
@@ -152,7 +160,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         </div>
 
         {/* Input Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
           {/* Username / Gmail */}
           <div className="space-y-1.5">
             <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
@@ -164,6 +172,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </span>
               <input
                 type="text"
+                name="username"
+                autoComplete="off"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 disabled={isLoading}
@@ -193,6 +203,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </span>
               <input
                 type={showPassword ? 'text' : 'password'}
+                name="password"
+                autoComplete="new-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={isLoading}
