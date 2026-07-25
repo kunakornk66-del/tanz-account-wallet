@@ -223,26 +223,27 @@ export interface AuthResult {
 }
 
 /**
- * Validates a username.
- * Must be 3-20 characters and contain only alphanumeric characters or underscores.
+ * Validates a username or email address.
+ * Allows standard usernames or full Gmail/email addresses.
  */
 export function validateUsername(username: string): { isValid: boolean; message: string } {
   const trimmed = username.trim();
   if (trimmed.length < 3) {
-    return { isValid: false, message: 'Username ต้องมีความยาวอย่างน้อย 3 ตัวอักษรครับ 🧸' };
+    return { isValid: false, message: 'กรุณากรอก Email หรือ Username อย่างน้อย 3 ตัวอักษรครับ 🧸' };
   }
-  if (trimmed.length > 20) {
-    return { isValid: false, message: 'Username ต้องมีความยาวไม่เกิน 20 ตัวอักษรครับ 🧸' };
+  if (trimmed.length > 60) {
+    return { isValid: false, message: 'Email หรือ Username ยาวเกินไปครับ 🧸' };
   }
-  const usernameRegex = /^[a-zA-Z0-9_]+$/;
-  if (!usernameRegex.test(trimmed)) {
-    return { isValid: false, message: 'Username ต้องเป็นภาษาอังกฤษ ตัวเลข หรือเครื่องหมาย _ เท่านั้นครับ 🧸' };
+  // Allow letters, numbers, @, ., _, -
+  const emailOrUsernameRegex = /^[a-zA-Z0-9_@.-]+$/;
+  if (!emailOrUsernameRegex.test(trimmed)) {
+    return { isValid: false, message: 'กรุณากรอก Email หรือ Username ด้วยตัวอักษรภาษาอังกฤษ ตัวเลข @ . _ - เท่านั้นครับ 🧸' };
   }
   return { isValid: true, message: '' };
 }
 
 /**
- * Sign Up a new user with Username and Password.
+ * Sign Up a new user with Gmail/Email or Username and Password.
  * If successful, links the user's account to their current syncKey.
  */
 export async function signUpUser(username: string, password: string, syncKey: string): Promise<AuthResult> {
@@ -256,12 +257,14 @@ export async function signUpUser(username: string, password: string, syncKey: st
       return { success: false, message: 'รหัสผ่านต้องมีความยาวอย่างน้อย 4 ตัวอักษรครับ 🔑' };
     }
 
-    const cleanUsername = username.trim().toLowerCase();
+    const rawInput = username.trim().toLowerCase();
+    // Convert email characters like @ and . into safe firestore document ID
+    const cleanUsername = rawInput.replace(/[@.]/g, '_');
     const userRef = doc(db, 'kuma_users', cleanUsername);
     const userSnap = await getDoc(userRef);
 
     if (userSnap.exists()) {
-      return { success: false, message: `ขออภัยครับ Username "${username}" นี้ถูกใช้งานไปแล้วน้า 🥺` };
+      return { success: false, message: `ขออภัยครับ บัญชีหรืออีเมล "${username}" นี้มีในระบบแล้ว สามารถกดเข้าสู่ระบบได้เลยครับ 🧸` };
     }
 
     // Check if the current syncKey is already owned/claimed by another user
@@ -277,11 +280,22 @@ export async function signUpUser(username: string, password: string, syncKey: st
       isNewKey = true;
     }
 
+    // Save shopEmail in localStorage for quick reference
+    if (rawInput.includes('@')) {
+      try {
+        localStorage.setItem('shopEmail', rawInput);
+      } catch (e) {
+        console.warn('LocalStorage error:', e);
+      }
+    }
+
     // Save user profile with associated sync key
     await setDoc(userRef, {
       username: cleanUsername,
-      displayName: username.trim(),
-      password: password, // For simple template auth, we store/compare plaintext or basic encoding.
+      rawUsername: rawInput,
+      email: rawInput.includes('@') ? rawInput : '',
+      displayName: rawInput.includes('@') ? rawInput.split('@')[0] : username.trim(),
+      password: password,
       syncKey: finalSyncKey,
       createdAt: Date.now()
     });
@@ -292,7 +306,7 @@ export async function signUpUser(username: string, password: string, syncKey: st
         ? 'สมัครสมาชิกสำเร็จ! คุมะคุงสร้างรหัสบัญชีส่วนตัวใหม่ให้เพื่อความปลอดภัยแล้วครับ 🎉🧸'
         : 'สมัครสมาชิกและเชื่อมต่อบัญชีสำเร็จแล้วครับ! 🎉🧸', 
       syncKey: finalSyncKey,
-      username: username.trim()
+      username: rawInput.includes('@') ? rawInput.split('@')[0] : username.trim()
     };
   } catch (error) {
     console.error("Error signing up user:", error);
@@ -301,20 +315,32 @@ export async function signUpUser(username: string, password: string, syncKey: st
 }
 
 /**
- * Log In an existing user with Username and Password.
+ * Log In an existing user with Gmail/Email or Username and Password.
  */
 export async function loginUser(username: string, password: string): Promise<AuthResult> {
   try {
     if (!username || !password) {
-      return { success: false, message: 'กรุณากรอก Username และรหัสผ่านให้ครบถ้วนครับ 🔑' };
+      return { success: false, message: 'กรุณากรอก Email/Username และรหัสผ่านให้ครบถ้วนครับ 🔑' };
     }
 
-    const cleanUsername = username.trim().toLowerCase();
-    const userRef = doc(db, 'kuma_users', cleanUsername);
-    const userSnap = await getDoc(userRef);
+    const rawInput = username.trim().toLowerCase();
+    const cleanUsername = rawInput.replace(/[@.]/g, '_');
+    
+    // First try directly with document key
+    let userRef = doc(db, 'kuma_users', cleanUsername);
+    let userSnap = await getDoc(userRef);
+
+    // If not found, try searching by rawUsername or email field
+    if (!userSnap.exists()) {
+      const q = query(collection(db, 'kuma_users'), where('rawUsername', '==', rawInput));
+      const querySnapshot = await getDocs(q);
+      if (!querySnapshot.empty) {
+        userSnap = querySnapshot.docs[0];
+      }
+    }
 
     if (!userSnap.exists()) {
-      return { success: false, message: 'ไม่พบ Username นี้ในระบบครับ กรุณาตรวจสอบหรือสมัครสมาชิกใหม่น้า 🧸' };
+      return { success: false, message: 'ไม่เทียบบัญชีนี้ในระบบครับ กรุณาตรวจสอบ Email/Username หรือกดสมัครสมาชิกใหม่น้า 🧸' };
     }
 
     const userData = userSnap.data();
@@ -322,11 +348,20 @@ export async function loginUser(username: string, password: string): Promise<Aut
       return { success: false, message: 'รหัสผ่านไม่ถูกต้องครับ กรุณาลองใหม่อีกครั้งนะคุมะ 🥺🔑' };
     }
 
+    // Save shopEmail in localStorage if email exists
+    if (userData.email || rawInput.includes('@')) {
+      try {
+        localStorage.setItem('shopEmail', userData.email || rawInput);
+      } catch (e) {
+        console.warn('LocalStorage error:', e);
+      }
+    }
+
     return {
       success: true,
-      message: `ยินดีต้อนรับกลับมาครับคุณ ${userData.displayName || username}! 🧸✨`,
+      message: `ยินดีต้อนรับกลับมาครับคุณ ${userData.displayName || rawInput}! 🧸✨`,
       syncKey: userData.syncKey,
-      username: userData.displayName || username
+      username: userData.displayName || rawInput
     };
   } catch (error) {
     console.error("Error logging in user:", error);
@@ -393,12 +428,33 @@ export async function loginWithGoogle(syncKey: string): Promise<AuthResult> {
     };
   } catch (error: any) {
     console.error("Error signing in with Google:", error);
-    if (error.code === 'auth/popup-blocked') {
-      return { success: false, message: 'หน้าต่างป๊อปอัพถูกบล็อก กรุณาอนุญาตป๊อปอัพในเบราว์เซอร์แล้วลองใหม่อีกครั้งนะคุมะ 🥺' };
+    const code = error?.code || '';
+    
+    if (code === 'auth/operation-not-allowed') {
+      return { 
+        success: false, 
+        message: 'ยังไม่ได้เปิดใช้งาน Google Sign-in ใน Firebase Console! กรุณาไปที่ Firebase Console > Authentication > Sign-in method > กด Enable Google และเลือก Project support email ครับ' 
+      };
     }
-    if (error.code === 'auth/popup-closed-by-user') {
-      return { success: false, message: 'หน้าต่างป๊อปอัพถูกปิดโดยผู้ใช้ กรุณาลองใหม่อีกครั้งน้า 🧸' };
+    if (code === 'auth/unauthorized-domain') {
+      return { 
+        success: false, 
+        message: `โดเมนนี้ยังไม่ได้อนุญาตใน Firebase! กรุณาไปที่ Firebase Console > Authentication > Settings > Authorized domains แล้วเพิ่มโดเมน (${typeof window !== 'undefined' ? window.location.hostname : 'แอปของคุณ'})` 
+      };
     }
-    return { success: false, message: 'เกิดข้อผิดพลาดในการเชื่อมต่อ Google Auth กรุณาเปิดแอปในแท็บใหม่เพื่อแก้ปัญหาป๊อปอัพบน iFrame หรือใช้ Username/Password ครับ 🥺' };
+    if (code === 'auth/popup-blocked') {
+      return { success: false, message: 'หน้าต่างป๊อปอัพถูกบล็อกโดยเบราว์เซอร์ กรุณาอนุญาตให้แสดง Pop-up แล้วลองใหม่อีกครั้งครับ 🥺' };
+    }
+    if (code === 'auth/popup-closed-by-user') {
+      return { success: false, message: 'หน้าต่างเข้าสู่ระบบ Google ถูกปิดโดยผู้ใช้ 🧸' };
+    }
+    if (code === 'auth/cancelled-popup-request') {
+      return { success: false, message: 'มีการเปิดป๊อปอัพซ้ำ กรุณากดลองอีกครั้งครับ' };
+    }
+
+    return { 
+      success: false, 
+      message: `เกิดข้อผิดพลาด Google Auth (${code}): ${error.message || 'ไม่สามารถเชื่อมต่อได้'} กรุณาลองเปิดแอปในแท็บใหม่ หรือลองใช้ Username/Password ครับ` 
+    };
   }
 }

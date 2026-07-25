@@ -19,7 +19,6 @@ import {
   validateUsername,
   signUpUser,
   loginUser,
-  loginWithGoogle,
   uploadCategoriesToCloud,
   downloadCategoriesFromCloud,
   uploadThemeToCloud,
@@ -1308,34 +1307,6 @@ export default function App() {
     }
   };
 
-  const handleAuthGoogleSignIn = async () => {
-    setIsAuthLoading(true);
-    try {
-      const timeoutMs = 15000; // Allow 15 seconds for Google account selection popup
-      const googleAuthPromise = loginWithGoogle(syncKey);
-      
-      const result = await Promise.race([
-        googleAuthPromise,
-        new Promise<any>((resolve) => setTimeout(() => resolve({
-          success: false,
-          message: '⏱️ หน้าต่างเลือกบัญชี Google ทำงานล่าช้า กรุณาเปิดแอปในแท็บใหม่เพื่อแก้ไขปัญหาระบบความปลอดภัยของ iFrame นะครับ 🧸'
-        }), timeoutMs))
-      ]);
-
-      if (result.success && result.username && result.syncKey) {
-        addToast(result.message, 'success');
-        handleLoginSuccess(result.username, result.syncKey);
-      } else {
-        addToast(result.message || 'ไม่สามารถลงชื่อเข้าใช้งานด้วย Google ได้ครับ 🥺', 'error');
-      }
-    } catch (err) {
-      console.error('Google Auth error:', err);
-      addToast('เกิดข้อผิดพลาดในการเชื่อมต่อ Google Auth 🥺', 'error');
-    } finally {
-      setIsAuthLoading(false);
-    }
-  };
-
   if (!loggedInUser) {
     return (
       <div className={`min-h-screen font-sans flex flex-col items-center justify-center p-4 transition-all duration-300 ${currentTheme.background} ${currentTheme.textPrimary}`}>
@@ -1434,7 +1405,7 @@ export default function App() {
             {/* Username */}
             <div className="space-y-1.5">
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                Username
+                Gmail หรือ Username
               </label>
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
@@ -1445,7 +1416,7 @@ export default function App() {
                   value={authUsername}
                   onChange={(e) => setAuthUsername(e.target.value)}
                   disabled={isAuthLoading}
-                  placeholder="ภาษาอังกฤษและตัวเลขเท่านั้น"
+                  placeholder="เช่น yourname@gmail.com หรือ kuma_user"
                   className={`w-full pl-9 pr-4 py-2.5 rounded-2xl text-xs font-semibold border transition-all focus:outline-hidden ${
                     isDark
                       ? 'bg-slate-950 border-slate-800 text-white focus:border-amber-400/50'
@@ -1515,45 +1486,6 @@ export default function App() {
               </span>
             </button>
           </form>
-
-          {/* Divider */}
-          <div className="flex items-center my-4">
-            <div className="flex-1 border-t border-slate-200 dark:border-slate-800"></div>
-            <span className="px-2 text-[10px] font-bold text-slate-400 uppercase">หรือ</span>
-            <div className="flex-1 border-t border-slate-200 dark:border-slate-800"></div>
-          </div>
-
-          {/* Google */}
-          <button
-            type="button"
-            onClick={handleAuthGoogleSignIn}
-            disabled={isAuthLoading}
-            className={`w-full py-2.5 rounded-2xl text-xs font-bold transition-all active:scale-97 border flex items-center justify-center gap-2 ${
-              isDark 
-                ? 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800/50 hover:text-white' 
-                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-            }`}
-          >
-            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-              <path
-                fill="#EA4335"
-                d="M12 5.04c1.66 0 3.2.57 4.38 1.69l3.27-3.27C17.68 1.54 14.98 1 12 1 7.35 1 3.37 3.67 1.39 7.56l3.89 3.02c1-2.93 3.73-5.54 6.72-5.54z"
-              />
-              <path
-                fill="#4285F4"
-                d="M23.49 12.27c0-.81-.07-1.59-.2-2.36H12v4.51h6.46c-.29 1.48-1.14 2.73-2.4 3.58l3.73 2.89c2.18-2.01 3.7-4.99 3.7-8.62z"
-              />
-              <path
-                fill="#FBBC05"
-                d="M5.28 14.54c-.24-.72-.38-1.5-.38-2.31s.14-1.59.38-2.31L1.39 7.56C.5 9.36 0 11.33 0 13.41s.5 4.05 1.39 5.85l3.89-3.02z"
-              />
-              <path
-                fill="#34A853"
-                d="M12 22.96c3.24 0 5.97-1.07 7.96-2.91l-3.73-2.89c-1.1.74-2.5 1.18-4.23 1.18-2.99 0-5.72-2.61-6.72-5.54l-3.89 3.02c1.98 3.89 5.96 6.56 10.61 6.56z"
-              />
-            </svg>
-            <span>เชื่อมต่อผ่านบัญชี Google ☁️</span>
-          </button>
         </div>
       </div>
     );
