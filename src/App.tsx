@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'motion/react';
 import confetti from 'canvas-confetti';
-import { Transaction, ThemeType, ReminderSettings } from './types';
+import { Transaction, ThemeType, ReminderSettings, SavingsGoal } from './types';
 import { APP_THEMES, getCategoryDetails, INCOME_CATEGORIES, EXPENSE_CATEGORIES, CategoryInfo } from './themes';
 import { TransactionForm } from './components/TransactionForm';
 import { FinancialCharts } from './components/FinancialCharts';
@@ -59,7 +59,8 @@ import {
   RefreshCw,
   Download,
   List,
-  Smartphone
+  Smartphone,
+  Lightbulb
 } from 'lucide-react';
 
 // No initial transactions - start completely fresh
@@ -94,7 +95,7 @@ export default function App() {
     };
   };
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'add' | 'stats' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'add' | 'stats' | 'insights' | 'settings'>('dashboard');
   const [selectedThemeId, setSelectedThemeId] = useState<ThemeType>(() => {
     return (localStorage.getItem('kuma_theme') as ThemeType) || 'cherry';
   });
@@ -129,8 +130,59 @@ export default function App() {
   const [dashboardViewMode, setDashboardViewMode] = useState<'list' | 'calendar'>('list');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [selectedSubCategoryFilter, setSelectedSubCategoryFilter] = useState<string>('all');
+  const [isCategoriesCollapsed, setIsCategoriesCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem('kuma_categories_collapsed') === 'true';
+  });
+
+  const toggleCategoriesCollapse = () => {
+    setIsCategoriesCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('kuma_categories_collapsed', String(next));
+      return next;
+    });
+  };
   const [defaultAddDate, setDefaultAddDate] = useState<string | undefined>(undefined);
   const [selectedCalendarDay, setSelectedCalendarDay] = useState<string | null>(null);
+
+  // --- Monthly Budget & Savings Goals States ---
+  const [monthlyBudgets, setMonthlyBudgets] = useState<Record<string, number>>(() => {
+    const stored = localStorage.getItem('kuma_monthly_budgets');
+    return stored ? JSON.parse(stored) : {};
+  });
+
+  const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>(() => {
+    const stored = localStorage.getItem('kuma_savings_goals');
+    return stored ? JSON.parse(stored) : [
+      { id: '1', name: 'เที่ยวต่างจังหวัด 🚗', targetAmount: 5000, currentAmount: 1500, emoji: '🏕️', createdAt: Date.now() - 1000000 },
+      { id: '2', name: 'ซื้อแท็บเล็ตใหม่ 📱', targetAmount: 15000, currentAmount: 8000, emoji: '💻', createdAt: Date.now() }
+    ];
+  });
+
+  const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
+  const [isSavingsModalOpen, setIsSavingsModalOpen] = useState(false);
+  const [budgetInputValue, setBudgetInputValue] = useState('');
+  
+  // State for creating savings goal
+  const [newGoalName, setNewGoalName] = useState('');
+  const [newGoalTarget, setNewGoalTarget] = useState('');
+  const [newGoalCurrent, setNewGoalCurrent] = useState('');
+  const [newGoalEmoji, setNewGoalEmoji] = useState('🎯');
+
+  // Goal Deposit/Withdraw Action modal states
+  const [isGoalActionModalOpen, setIsGoalActionModalOpen] = useState(false);
+  const [activeGoalId, setActiveGoalId] = useState<string | null>(null);
+  const [goalActionType, setGoalActionType] = useState<'deposit' | 'withdraw'>('deposit');
+  const [goalActionAmount, setGoalActionAmount] = useState('');
+
+  // Trigger local storage save whenever budget or savings goal changes
+  useEffect(() => {
+    localStorage.setItem('kuma_monthly_budgets', JSON.stringify(monthlyBudgets));
+  }, [monthlyBudgets]);
+
+  useEffect(() => {
+    localStorage.setItem('kuma_savings_goals', JSON.stringify(savingsGoals));
+  }, [savingsGoals]);
+
 
   // PWA installation states
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -286,7 +338,7 @@ export default function App() {
 
   // --- Toast Manager Helpers ---
   const addToast = (message: string, type: ToastType = 'success') => {
-    const id = Date.now().toString();
+    const id = 'toast-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
     setToasts(prev => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
@@ -553,8 +605,14 @@ export default function App() {
     const todayStr = new Date().toISOString().split('T')[0];
     const recordedToday = transactions.some(t => t.date === todayStr);
 
+    const currentMonthBudget = monthlyBudgets[selectedMonth];
+
     if (transactions.length === 0) {
       setMascotMessage('ยังไม่มีบันทึกเลยค้าบ กดปุ่มบวกสีชมพูด้านล่างเพื่อจดรายการแรกกับคุมะคุงเลยน้า 🧸💕');
+    } else if (currentMonthBudget && expenseSum >= currentMonthBudget) {
+      setMascotMessage(`🚨 โอ๊ะโอ! เดือนนี้ใช้จ่ายไป ฿${expenseSum.toLocaleString()} เกินงบที่ตั้งไว้ ฿${currentMonthBudget.toLocaleString()} แล้วนะคุมะ! ประหยัดด่วนๆ เลยน้า 🧸💥`);
+    } else if (currentMonthBudget && expenseSum >= currentMonthBudget * 0.8) {
+      setMascotMessage(`⚠️ เตือนภัยคุมะ! เดือนนี้ใช้เงินไปแล้ว ฿${expenseSum.toLocaleString()} ใกล้จะหมดงบ ฿${currentMonthBudget.toLocaleString()} แล้วน้า (ใช้ไปแล้ว ${Math.round(expenseSum / currentMonthBudget * 100)}%) 🧸💧`);
     } else if (!recordedToday) {
       setMascotMessage('ก๊อกๆ 🧸 วันนี้คุมะคุงยังไม่เห็นบันทึกรายจ่ายเลยน้า อย่าลืมจดข้าวเที่ยงหรือชานมไข่มุกนะค้าบ ✨');
     } else if (expenseSum > incomeSum && incomeSum > 0) {
@@ -564,7 +622,8 @@ export default function App() {
     } else {
       setMascotMessage('คุมะคุงสแตนด์บายพร้อมบันทึกทุกบาททุกสตางค์แล้วค้าบ! วันนี้ออมเงินเพื่อเป้าหมายกันเถอะนะ 🧸✨');
     }
-  }, [transactions, selectedMonth]);
+  }, [transactions, selectedMonth, monthlyBudgets]);
+
 
   // --- Save / Edit / Delete Core Handlers ---
   const handleSaveTransaction = (txData: Omit<Transaction, 'id' | 'createdAt'> & { id?: string }) => {
@@ -873,6 +932,226 @@ export default function App() {
       balance: income - expense
     };
   }, [transactions, selectedMonth]);
+
+  // --- Kuma Financial Insights Memo ---
+  const kumaInsights = useMemo(() => {
+    const monthlyItems = transactions.filter(t => t.date.startsWith(selectedMonth));
+    const monthlyExpenses = monthlyItems.filter(t => t.type === 'expense');
+    const totalExpense = monthlyExpenses.reduce((sum, t) => sum + t.amount, 0);
+    const totalIncome = monthlyItems.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
+
+    // Group expenses by category
+    const catGroups: Record<string, number> = {};
+    monthlyExpenses.forEach(t => {
+      catGroups[t.category] = (catGroups[t.category] || 0) + t.amount;
+    });
+
+    const topExpenses = Object.keys(catGroups).map(catId => {
+      const catDetails = expenseCategories.find(c => c.id === catId) || { name: 'อื่นๆ', emoji: '🧸' };
+      return {
+        id: catId,
+        name: catDetails.name,
+        emoji: catDetails.emoji,
+        amount: catGroups[catId],
+        percentage: totalExpense > 0 ? Math.round((catGroups[catId] / totalExpense) * 100) : 0
+      };
+    }).sort((a, b) => b.amount - a.amount).slice(0, 3);
+
+    // Calculate daily average spending
+    const expenseDates = new Set(monthlyExpenses.map(t => t.date));
+    const uniqueDaysCount = expenseDates.size || 1;
+    const dailyAverage = totalExpense / uniqueDaysCount;
+
+    // Generate 4 distinct smart advices from Kuma
+    const advicesList: Array<{ id: number; title: string; desc: string; emoji: string; status: 'good' | 'warn' | 'info' }> = [];
+
+    // 1. Budget Advice
+    const budget = monthlyBudgets[selectedMonth];
+    if (budget) {
+      const percent = (totalExpense / budget) * 100;
+      if (percent >= 100) {
+        advicesList.push({
+          id: 1,
+          title: 'งบประมาณรายจ่ายเกินกำหนด!',
+          desc: `เดือนนี้รายจ่ายรวม ฿${totalExpense.toLocaleString()} เกินจากงบประมาณที่คุณตั้งไว้ที่ ฿${budget.toLocaleString()} แล้วน้าคุมะเป็นห่วง! คุมะว่าต้องชะลอการจ่ายด่วนเลยน้า 🚨🧸💧`,
+          emoji: '🎯',
+          status: 'warn'
+        });
+      } else if (percent >= 80) {
+        advicesList.push({
+          id: 1,
+          title: 'งบรายจ่ายใกล้ถึงขีดจำกัด',
+          desc: `คุณใช้จ่ายไปแล้ว ฿${totalExpense.toLocaleString()} คิดเป็น ${Math.round(percent)}% ของงบรายเดือน ฿${budget.toLocaleString()} ประหยัดขึ้นอีกนิดนะคุมะคอยเอาใจช่วย! ⚠️🧸✨`,
+          emoji: '🎯',
+          status: 'warn'
+        });
+      } else {
+        advicesList.push({
+          id: 1,
+          title: 'การควบคุมงบประมาณดีเยี่ยม',
+          desc: `ใช้ไปเพียง ${Math.round(percent)}% ของงบ ฿${budget.toLocaleString()} สภาพคล่องเยี่ยมมาก มีความประหยัดสุดยอดคุมะยกนิ้วให้เลย! 👍🧸🏆`,
+          emoji: '🎯',
+          status: 'good'
+        });
+      }
+    } else {
+      advicesList.push({
+        id: 1,
+        title: 'แนะนำให้ลองตั้งเป้าหมายงบรายจ่าย',
+        desc: 'การตั้งงบประมาณควบคุมรายจ่ายช่วยจัดสรรเงินและระงับความอยากซื้อของที่ไม่จำเป็นได้ดีมากเลยน้า ลองกดตั้งงบดูสิคุมะคุงเชียร์อยู่! 🧸✨',
+        emoji: '🎯',
+        status: 'info'
+      });
+    }
+
+    // 2. Top Expenses Category Advice
+    const topCat = topExpenses[0];
+    if (topCat) {
+      if (topCat.id === 'food') {
+        advicesList.push({
+          id: 2,
+          title: 'หมวดของอร่อยดีต่อใจแต่แอบเยอะน้า',
+          desc: `คุณหมดเงินไปกับหมวด "${topCat.emoji} ${topCat.name}" มากสุดเป็นอันดับ 1 ในเดือนนี้ คิดเป็น ${topCat.percentage}% ของรายจ่ายทั้งหมดเลย ของอร่อยฮีลใจได้ดีแต่พยายามวางแผนทานบุฟเฟต์ลดลงหน่อยน้าคุมะเป็นห่วง 🍩🧸🍕`,
+          emoji: '🍔',
+          status: 'info'
+        });
+      } else if (topCat.id === 'shopping') {
+        advicesList.push({
+          id: 2,
+          title: 'ของช้อปปิ้งมันต้องมีจริงรึเปล่าน้าคุมะ?',
+          desc: `หมวด "${topCat.emoji} ${topCat.name}" นำโด่งแซงทุกหมวดคิดเป็น ${topCat.percentage}% ของรายจ่าย ก่อนกดสั่งซื้อลองปล่อยทิ้งไว้ในตะกร้าสัก 2 วัน แล้วค่อยกลับมาดูใหม่ ช่วยเซฟเงินได้เยอะสุดๆ เลยน้า 🛍️🧸✨`,
+          emoji: '🛍️',
+          status: 'info'
+        });
+      } else if (topCat.id === 'travel') {
+        advicesList.push({
+          id: 2,
+          title: 'ทริปท่องเที่ยวและการเดินทางเบิกบานใจ',
+          desc: `หมดงบไปกับการเดินทางและท่องเที่ยวค่อนข้างสูงคิดเป็น ${topCat.percentage}% ของรายจ่าย เที่ยวสนุกปลอดภัยเป็นเรื่องดีแต่อย่าลืมสำรองงบกลับบ้านกันด้วยนะค้าบ 🚗🧸🏕️`,
+          emoji: '🏕️',
+          status: 'info'
+        });
+      } else {
+        advicesList.push({
+          id: 2,
+          title: `สัดส่วนรายจ่ายหมวดหลักค่อนข้างสูง`,
+          desc: `เดือนนี้ใช้จ่ายหมวด "${topCat.emoji} ${topCat.name}" เป็นสัดส่วนเยอะที่สุดคิดเป็น ${topCat.percentage}% ของรายจ่าย ลองพิจารณาลดค่าใช้จ่ายย่อยที่ไม่จำเป็นในส่วนนี้ดูน้าคุมะคุงแนะนำ 💡🧸`,
+          emoji: '💡',
+          status: 'info'
+        });
+      }
+    } else {
+      advicesList.push({
+        id: 2,
+        title: 'พร้อมแนะนำพฤติกรรมใช้เงินหลัก',
+        desc: 'เมื่อใดที่คุณเริ่มบันทึกรายจ่าย คุมะคุงจะคอยนำรายการมาจัดลำดับหมวดหมู่ที่ใช้เงินมากที่สุดเพื่อช่วยคุณวางแผนประหยัดอย่างมีประสิทธิภาพจ้า 📝🧸',
+        emoji: '📊',
+        status: 'info'
+      });
+    }
+
+    // 3. Savings Rate Advice
+    const savingsRate = totalIncome > 0 ? ((totalIncome - totalExpense) / totalIncome) * 100 : 0;
+    if (totalIncome > 0) {
+      if (savingsRate < 0) {
+        advicesList.push({
+          id: 3,
+          title: 'กระเป๋าตังค์สั่นคลอน รายจ่ายเกินรายได้ 🚨',
+          desc: `เดือนนี้รายจ่ายรวมสูงกว่ารายรับไปแล้วน้าคุมะ! คุมะคุงแนะนำเทคนิค "หักออมก่อนใช้" 10% ทันทีเมื่อได้รับเงินเข้ามา เพื่อความอุ่นใจในการใช้ชีวิตนะคุมะ 💧🧸`,
+          emoji: '📈',
+          status: 'warn'
+        });
+      } else if (savingsRate >= 30) {
+        advicesList.push({
+          id: 3,
+          title: 'ยอดนักออมฝีมือระดับเหรียญทอง 🥇',
+          desc: `คุณมีอัตราการออมสะสมสูงถึง ${Math.round(savingsRate)}% ในเดือนนี้! ถือว่ามีวินัยการเงินขั้นเทพสุดๆ คุมะคุงภูมิใจและขอส่งวิ้งค์น่ารักๆ ให้เป็นรางวัลเลยจ้า 😉🧸💖`,
+          emoji: '📈',
+          status: 'good'
+        });
+      } else {
+        advicesList.push({
+          id: 3,
+          title: 'อัตราการออมอยู่ในเกณฑ์พัฒนาได้ดี',
+          desc: `เดือนนี้คุณมีส่วนต่างเงินออมคิดเป็น ${Math.round(savingsRate)}% ของรายได้ ลองตั้งเป้าหมายเพิ่มพูนอัตราออมขึ้นทีละ 2-3% ในเดือนหน้า เพื่อความสนุกและมั่นคงน้า 🌱🧸`,
+          emoji: '📈',
+          status: 'good'
+        });
+      }
+    } else {
+      advicesList.push({
+        id: 3,
+        title: 'สูตรลับความมั่งคั่งสไตล์คุมะ',
+        desc: 'จำสูตรลัดง่ายๆ: "รายรับ - เงินออม = รายจ่าย" ให้แบ่งออมทันทีที่เงินออก แล้วจะพบว่าคุณสามารถเก็บออมเงินได้ไวขึ้นอย่างน่าอัศจรรย์ใจคุมะ! 💰🧸🌟',
+        emoji: '🌱',
+        status: 'info'
+      });
+    }
+
+    // 4. Savings Goal Completion Advice
+    const activeGoal = savingsGoals[0];
+    if (activeGoal) {
+      const progress = Math.round((activeGoal.currentAmount / activeGoal.targetAmount) * 100);
+      if (progress >= 100) {
+        advicesList.push({
+          id: 4,
+          title: 'ยินดีด้วยอย่างยิ่งกับเป้าหมายออมสำเร็จ! 👑',
+          desc: `เป้าหมายการออม "${activeGoal.emoji} ${activeGoal.name}" ของคุณทำสำเร็จทะลุ 100% เรียบร้อยแล้ว! วิเศษที่สุดเลย เก่งจังครับ คุมะคุงขอมอบมงกุฎให้คุณเลยคุมะ 🏆🧸👑`,
+          emoji: '🏆',
+          status: 'good'
+        });
+      } else {
+        advicesList.push({
+          id: 4,
+          title: 'ภารกิจพิชิตฝันกำลังคืบหน้า',
+          desc: `เป้าหมายออมเงิน "${activeGoal.emoji} ${activeGoal.name}" ดำเนินการคืบหน้าไปแล้วกว่า ${progress}% ค่อยๆ สะสมเพิ่มอีกวันละนิด ใกล้เส้นชัยความสำเร็จแล้วคุมะเอาใจเชียร์ขาดใจ! 🎯🧸✨`,
+          emoji: '🏆',
+          status: 'info'
+        });
+      }
+    } else {
+      advicesList.push({
+        id: 4,
+        title: 'สร้างเป้าหมายเพื่อสร้างกำลังใจการออม',
+        desc: 'คุณยังไม่ได้กำหนดเป้าหมายออมเงินเลยน้า มาร่วมตั้งเป้าหมายน่ารักๆ เพื่อเดินทางท่องเที่ยว หรือซื้ออุปกรณ์ฮีลใจกันเถอะ คุมะคุงจะได้ช่วยนับเหรียญสะสมนะคุมะ! 🎯🧸',
+        emoji: '🏆',
+        status: 'info'
+      });
+    }
+
+    // Generate main highlighted advice for backward compatibility
+    let advice = 'เดือนนี้ยังไม่มีประวัติรายจ่ายเลยค้าบ ชิลๆ ถนอมกระเป๋าเงินไปก่อนน้าคุมะเชียร์อยู่! 🧸✨';
+    let alertType: 'success' | 'warning' | 'info' = 'info';
+
+    if (totalExpense > 0) {
+      const savingsRateVal = totalIncome > 0 ? ((totalIncome - totalExpense) / totalIncome) * 100 : -1;
+      if (totalIncome > 0 && totalExpense > totalIncome * 0.85) {
+        advice = `🚨 เตือนภัยกระเป๋าตังค์แบนคุมะ! รายจ่ายในเดือนนี้กินเงินไปถึง ${Math.round(totalExpense / totalIncome * 100)}% ของรายได้แล้วน้า คุมะคิดว่าเราควรพักปุ่มช้อปปิ้งกันสักหน่อยแล้วนะค้าบ 🧸💦`;
+        alertType = 'warning';
+      } else if (savingsRateVal >= 30) {
+        advice = `🌟 ว้าวสุดยอดคุมะ! เดือนนี้คุณมีอัตราการออมเงินสูงถึง ${Math.round(savingsRateVal)}% เลยนะค้าบ ถือว่ามีวินัยการเงินที่ดีมากๆ คุมะขอยกนิ้วให้เลย รักษาฟอร์มแบบนี้ไว้น้า! 👍🧸✨`;
+        alertType = 'success';
+      } else if (topCat) {
+        if (topCat.id === 'food') {
+          advice = `🍩 เดือนนี้คุณหมดเงินไปกับ "${topCat.emoji} ${topCat.name}" มากที่สุดเป็นอันดับ 1 เลยน้า (คิดเป็น ${topCat.percentage}% ของรายจ่าย) ของอร่อยช่วยฮีลใจได้ดี แต่อย่าลืมวางแผนการเงินด้วยนะค้าบ 🧸🍕`;
+        } else if (topCat.id === 'shopping') {
+          advice = `🛍️ กระซิบๆ... เดือนนี้รายจ่ายหมวด "${topCat.emoji} ${topCat.name}" แซงทางโค้งมากเลยคุมะ (${topCat.percentage}%) ก่อนกดซื้อ ลองทิ้งไว้ในตะกร้าสัก 2 วัน แล้วค่อยกลับมาดูใหม่ ช่วยประหยัดได้เยอะเลยน้า 🧸✨`;
+        } else if (topCat.id === 'travel') {
+          advice = `🚗 เดือนนี้หมดไปกับการเดินทางท่องเที่ยวค่อนข้างเยอะเลยน้า (${topCat.percentage}%) เดินทางปลอดภัยหายห่วง แต่อย่าลืมเช็กแผนเงินออมกันด้วยนะคุมะ 🧸🏕️`;
+        } else {
+          advice = `💡 สังเกตๆ... เดือนนี้คุณใช้จ่ายไปกับหมวด "${topCat.emoji} ${topCat.name}" เป็นสัดส่วนเยอะที่สุดเลยน้า (${topCat.percentage}%) ลองพิจารณาลดทอนค่าใช้จ่ายที่ไม่จำเป็นในหมวดนี้ดูนะคุมะ 🧸`;
+        }
+      }
+    }
+
+    return {
+      topExpenses,
+      dailyAverage,
+      advice,
+      alertType,
+      advicesList
+    };
+  }, [transactions, selectedMonth, expenseCategories, monthlyBudgets, savingsGoals]);
 
   // Handle month scroll helpers
   const handlePrevMonth = () => {
@@ -1549,15 +1828,92 @@ export default function App() {
               </div>
 
               {/* Main Savings Balance */}
-              <div className="text-center py-2 relative z-10">
+              <div className="text-center py-1 relative z-10">
                 <span className="text-[10px] font-bold text-white/75 tracking-wider uppercase">ยอดคงเหลือประจำเดือน</span>
                 <h2 className="text-3xl font-extrabold tracking-tight mt-0.5">
                   ฿{summaryTotals.balance.toLocaleString(undefined, {minimumFractionDigits: 2})}
                 </h2>
               </div>
 
+              {/* Monthly Spending Budget Limit Tracker */}
+              <div className="mt-2.5 px-3 py-2 rounded-2xl bg-black/15 border border-white/5 relative z-10 text-xs">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="font-extrabold text-[10px] tracking-wide text-white/90 flex items-center gap-1">
+                    🎯 งบรายจ่ายของเดือนนี้
+                  </span>
+                  {monthlyBudgets[selectedMonth] ? (
+                    <div className="flex items-center gap-1.5">
+                      <button 
+                        onClick={() => {
+                          setBudgetInputValue(String(monthlyBudgets[selectedMonth]));
+                          setIsBudgetModalOpen(true);
+                        }}
+                        className="text-[9px] bg-white/20 hover:bg-white/30 px-1.5 py-0.5 rounded font-extrabold transition-all active:scale-95"
+                      >
+                        แก้ไข
+                      </button>
+                      <button 
+                        onClick={() => {
+                          const nextBudgets = { ...monthlyBudgets };
+                          delete nextBudgets[selectedMonth];
+                          setMonthlyBudgets(nextBudgets);
+                          addToast('ล้างงบประมาณรายจ่ายเรียบร้อยแล้วน้า 🧸🧼', 'success');
+                        }}
+                        className="text-[9px] bg-rose-500/30 hover:bg-rose-500/50 text-rose-100 px-1.5 py-0.5 rounded font-extrabold transition-all active:scale-95"
+                      >
+                        ล้าง
+                      </button>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => {
+                        setBudgetInputValue('');
+                        setIsBudgetModalOpen(true);
+                      }}
+                      className="text-[9px] bg-white/25 hover:bg-white/40 px-2 py-0.5 rounded font-extrabold transition-all active:scale-95"
+                    >
+                      + ตั้งงบรายจ่าย
+                    </button>
+                  )}
+                </div>
+
+                {monthlyBudgets[selectedMonth] ? (
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[9px] text-white/80 font-bold">
+                      <span>ใช้จ่ายจริง: ฿{summaryTotals.expense.toLocaleString()}</span>
+                      <span>งบทั้งหมด: ฿{monthlyBudgets[selectedMonth].toLocaleString()}</span>
+                    </div>
+                    {/* Progress Bar */}
+                    <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+                      <div 
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          summaryTotals.expense >= monthlyBudgets[selectedMonth] ? 'bg-red-400 shadow-sm' :
+                          summaryTotals.expense >= monthlyBudgets[selectedMonth] * 0.8 ? 'bg-amber-400' :
+                          'bg-emerald-300'
+                        }`}
+                        style={{ width: `${Math.min(100, (summaryTotals.expense / monthlyBudgets[selectedMonth]) * 100)}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between items-center text-[8px] text-white/70">
+                      <span>
+                        {summaryTotals.expense >= monthlyBudgets[selectedMonth] ? '❌ เกินงบแล้วนะคุมะเป็นห่วง!' :
+                         summaryTotals.expense >= monthlyBudgets[selectedMonth] * 0.8 ? '⚠️ ใช้ไปเยอะแล้ว ประหยัดหน่อยน้า!' :
+                         '✅ สภาพคล่องเยี่ยม ประหยัดมากจ้า!'}
+                      </span>
+                      <span className="font-bold">
+                        {Math.round((summaryTotals.expense / monthlyBudgets[selectedMonth]) * 100)}%
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-0.5 text-white/60 text-[9px] italic">
+                    คุมะคุงแนะนำให้ตั้งงบประมาณเพื่อติดตามควบคุมรายจ่ายนะคุมะ 🧸✨
+                  </div>
+                )}
+              </div>
+
               {/* Income vs Expense Grid */}
-              <div className="grid grid-cols-2 gap-3.5 mt-4 pt-4 border-t border-white/15 relative z-10 text-xs">
+              <div className="grid grid-cols-2 gap-3.5 mt-3 pt-3 border-t border-white/15 relative z-10 text-xs">
                 <div className="flex items-center gap-2">
                   <div className="p-1.5 rounded-xl bg-white/15">
                     <TrendingUp size={13} />
@@ -1591,6 +1947,168 @@ export default function App() {
                 <span className="text-sm font-extrabold text-emerald-500">
                   {summaryTotals.income > 0 ? Math.round(((summaryTotals.income - summaryTotals.expense) / summaryTotals.income) * 100) : 0}%
                 </span>
+              </div>
+            </div>
+
+            {/* SAVINGS GOALS SECTION */}
+            <div className={`p-4 rounded-3xl border ${
+              isDark ? 'bg-slate-900/40 border-slate-800/80' : 'bg-white border-slate-100 shadow-sm'
+            }`}>
+              <div className="flex justify-between items-center mb-3">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm">🎯</span>
+                  <span className="text-xs font-extrabold text-slate-800 dark:text-slate-100">เป้าหมายการออมเงินสุดน่ารัก</span>
+                </div>
+                <button
+                  onClick={() => {
+                    setNewGoalName('');
+                    setNewGoalTarget('');
+                    setNewGoalCurrent('');
+                    setNewGoalEmoji('🎯');
+                    setIsSavingsModalOpen(true);
+                  }}
+                  className="text-[10px] font-extrabold text-rose-500 dark:text-amber-400 bg-rose-500/10 dark:bg-amber-400/15 px-2.5 py-1 rounded-lg transition-all active:scale-95"
+                >
+                  + เพิ่มเป้าหมาย
+                </button>
+              </div>
+
+              {savingsGoals.length === 0 ? (
+                <div className="text-center py-6 text-slate-400 dark:text-slate-500 text-xs italic">
+                  ไม่มีเป้าหมายการออมเลย มาร่วมสร้างเป้าหมายแรกเพื่ออนาคตกับคุมะคุงกันนะ 🧸✨
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {savingsGoals.map(goal => {
+                    const progressPercent = Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 100));
+                    const isCompleted = goal.currentAmount >= goal.targetAmount;
+                    return (
+                      <div 
+                        key={goal.id} 
+                        className={`p-3 rounded-2xl border transition-all relative overflow-hidden ${
+                          isDark ? 'bg-slate-950/60 border-slate-900' : 'bg-slate-50 border-slate-100'
+                        }`}
+                      >
+                        {isCompleted && (
+                          <div className="absolute right-1 top-1 text-[18px] transform rotate-12 z-20" title="เป้าหมายสำเร็จแล้ว!">
+                            👑
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg select-none">{goal.emoji}</span>
+                            <div>
+                              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                                <span>{goal.name}</span>
+                                {isCompleted && (
+                                  <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                                    สำเร็จแล้ว! 🎉
+                                  </span>
+                                )}
+                              </h4>
+                              <p className="text-[9px] text-slate-400 font-semibold">
+                                ฿{goal.currentAmount.toLocaleString()} / ฿{goal.targetAmount.toLocaleString()}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 z-10">
+                            <button
+                              onClick={() => {
+                                setActiveGoalId(goal.id);
+                                setGoalActionType('deposit');
+                                setGoalActionAmount('');
+                                setIsGoalActionModalOpen(true);
+                              }}
+                              className="p-1 px-2 rounded-lg text-[9px] font-extrabold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 active:scale-90 transition-all"
+                            >
+                              ฝาก 💰
+                            </button>
+                            <button
+                              onClick={() => {
+                                setActiveGoalId(goal.id);
+                                setGoalActionType('withdraw');
+                                setGoalActionAmount('');
+                                setIsGoalActionModalOpen(true);
+                              }}
+                              className="p-1 px-2 rounded-lg text-[9px] font-extrabold bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 active:scale-90 transition-all"
+                            >
+                              ถอน 💸
+                            </button>
+                            <button
+                              onClick={() => {
+                                showConfirm(
+                                  'ลบเป้าหมายการออม 🗑️',
+                                  'ลบเป้าหมายการออมเงินนี้ใช่ไหมคุมะ? เงินสะสมเดิมจะหายไปน้า 🧸💧',
+                                  () => {
+                                    setSavingsGoals(prev => prev.filter(g => g.id !== goal.id));
+                                    addToast('ลบเป้าหมายการออมเรียบร้อยแล้วค้าบ 🗑️', 'info');
+                                  }
+                                );
+                              }}
+                              className="p-1 text-slate-400 hover:text-red-500 transition-all active:scale-90"
+                              title="ลบเป้าหมาย"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Progress bar */}
+                        <div className="space-y-1">
+                          <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+                            <div 
+                              className={`h-full rounded-full transition-all duration-500 ${
+                                isCompleted 
+                                  ? 'bg-gradient-to-r from-emerald-400 to-teal-500' 
+                                  : isDark ? 'bg-amber-500' : 'bg-rose-500'
+                              }`}
+                              style={{ width: `${progressPercent}%` }}
+                            />
+                          </div>
+                          <div className="flex justify-between items-center text-[9px] text-slate-400 font-bold">
+                            <span>{isCompleted ? 'คุมะยินดีด้วยน้าเก่งสุดๆ! 🐻💖' : 'เป้าหมายอยู่ไม่ไกล สู้ๆ ครับ!'}</span>
+                            <span className={isCompleted ? 'text-emerald-500' : 'text-slate-500 dark:text-slate-300'}>
+                              {progressPercent}%
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* KUMA FINANCIAL INSIGHTS SECTION (SIMPLE SUMMARY BUBBLE ONLY) */}
+            <div className={`p-4 rounded-3xl border ${
+              isDark ? 'bg-slate-900/40 border-slate-800/80' : 'bg-white border-slate-100 shadow-sm'
+            }`}>
+              <div className="flex items-center justify-between mb-2.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm">💡</span>
+                  <span className="text-xs font-extrabold text-slate-800 dark:text-slate-100">คุมะคุงวิเคราะห์กระเป๋าเงินประจำเดือน</span>
+                </div>
+                <button
+                  onClick={() => setActiveTab('insights')}
+                  className="text-[9px] font-extrabold text-rose-500 dark:text-amber-400 bg-rose-500/10 dark:bg-amber-400/15 px-2 py-0.5 rounded-md hover:scale-105 transition-all"
+                >
+                  ดูบทวิเคราะห์เชิงลึก ➔
+                </button>
+              </div>
+
+              {/* Dynamic advice bubble */}
+              <div className={`p-3 rounded-2xl border text-xs flex gap-2.5 items-start ${
+                kumaInsights.alertType === 'warning' 
+                  ? 'bg-rose-500/10 border-rose-500/20 text-rose-700 dark:text-rose-300' 
+                  : kumaInsights.alertType === 'success'
+                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-amber-500/10 border-amber-500/20 text-slate-700 dark:text-slate-300'
+              }`}>
+                <span className="text-base select-none">🧸</span>
+                <p className="font-semibold leading-relaxed">
+                  {kumaInsights.advice}
+                </p>
               </div>
             </div>
 
@@ -1655,50 +2173,97 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Category Grid Filter (Extremely beautiful, organized & symmetric) */}
-                  <div className={`p-3 rounded-2xl border transition-all ${
-                    isDark ? 'bg-slate-900/40 border-slate-800/80' : 'bg-slate-50/40 border-slate-100 shadow-xs'
-                  }`}>
-                    <div className="grid grid-cols-4 gap-1.5">
-                      <button
-                        onClick={() => { setSelectedCategoryFilter('all'); setSelectedSubCategoryFilter('all'); }}
-                        className={`p-1.5 rounded-xl text-[10px] font-extrabold transition-all border flex flex-col items-center justify-center gap-1 min-h-[58px] text-center ${
-                          selectedCategoryFilter === 'all'
-                            ? isDark
-                              ? 'bg-amber-500 border-amber-500 text-slate-950 shadow-xs'
-                              : 'bg-rose-500 border-rose-500 text-white shadow-xs'
-                            : isDark
-                              ? 'bg-slate-950 border-slate-900 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                              : 'bg-white border-slate-150 text-slate-600 hover:bg-slate-50'
-                        }`}
-                      >
-                        <span className="text-base">📁</span>
-                        <span className="truncate w-full text-center">ทั้งหมด</span>
-                      </button>
-                      {(filterType === 'income' ? incomeCategories : filterType === 'expense' ? expenseCategories : [...incomeCategories, ...expenseCategories]).map((cat, idx) => {
-                        const isSelected = selectedCategoryFilter === cat.id;
-                        const keySuffix = incomeCategories.some(c => c.id === cat.id) ? 'inc' : 'exp';
-                        return (
-                          <button
-                            key={`${cat.id}-${keySuffix}-${idx}`}
-                            onClick={() => { setSelectedCategoryFilter(cat.id); setSelectedSubCategoryFilter('all'); }}
-                            className={`p-1.5 rounded-xl text-[10px] font-extrabold transition-all border flex flex-col items-center justify-center gap-1 min-h-[58px] text-center ${
-                              isSelected
-                                ? isDark
-                                  ? 'bg-amber-500 border-amber-500 text-slate-950 shadow-xs'
-                                  : 'bg-rose-500 border-rose-500 text-white shadow-xs'
-                                : isDark
-                                  ? 'bg-slate-950 border-slate-900 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                                  : 'bg-white border-slate-150 text-slate-600 hover:bg-slate-50'
-                            }`}
+                  {/* Category Header Row with Toggle Button */}
+                  <div className="flex justify-between items-center px-1 mt-1">
+                    <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1.5">
+                      <span>📁 ค้นหาตามหมวดหมู่</span>
+                      {selectedCategoryFilter !== 'all' && (
+                        <span className="text-[9px] bg-rose-500/10 text-rose-500 dark:bg-amber-500/15 dark:text-amber-400 px-1.5 py-0.5 rounded-md font-extrabold flex items-center gap-1">
+                          เลือกอยู่: {
+                            (incomeCategories.find(c => c.id === selectedCategoryFilter)?.name || 
+                             expenseCategories.find(c => c.id === selectedCategoryFilter)?.name || '')
+                          }
+                          <button 
+                            onClick={(e) => { 
+                              e.stopPropagation(); 
+                              setSelectedCategoryFilter('all'); 
+                              setSelectedSubCategoryFilter('all'); 
+                            }}
+                            className="hover:text-red-500 text-[10px] ml-0.5"
+                            title="ล้างตัวกรอง"
                           >
-                            <span className="text-base select-none">{cat.emoji}</span>
-                            <span className="truncate w-full text-center">{cat.name}</span>
+                            ×
                           </button>
-                        );
-                      })}
-                    </div>
+                        </span>
+                      )}
+                    </span>
+                    <button
+                      onClick={toggleCategoriesCollapse}
+                      className="text-[10px] font-extrabold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 flex items-center gap-1 bg-slate-100 dark:bg-slate-900 px-2 py-0.5 rounded-lg transition-all active:scale-95 border border-slate-200/50 dark:border-slate-800/60"
+                    >
+                      {isCategoriesCollapsed ? (
+                        <>แสดงหมวดหมู่ ▾</>
+                      ) : (
+                        <>ซ่อนหมวดหมู่ ▴</>
+                      )}
+                    </button>
                   </div>
+
+                  {/* Category Grid Filter (Extremely beautiful, organized & symmetric) */}
+                  <motion.div
+                    initial={false}
+                    animate={{
+                      height: isCategoriesCollapsed ? 0 : 'auto',
+                      opacity: isCategoriesCollapsed ? 0 : 1,
+                      marginTop: isCategoriesCollapsed ? 0 : '0.375rem'
+                    }}
+                    transition={{ duration: 0.2, ease: 'easeInOut' }}
+                    className="overflow-hidden"
+                  >
+                    <div className={`p-3 rounded-2xl border transition-all ${
+                      isDark ? 'bg-slate-900/40 border-slate-800/80' : 'bg-slate-50/40 border-slate-100 shadow-xs'
+                    }`}>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        <button
+                          onClick={() => { setSelectedCategoryFilter('all'); setSelectedSubCategoryFilter('all'); }}
+                          className={`p-1.5 rounded-xl text-[10px] font-extrabold transition-all border flex flex-col items-center justify-center gap-1 min-h-[58px] text-center ${
+                            selectedCategoryFilter === 'all'
+                              ? isDark
+                                ? 'bg-amber-500 border-amber-500 text-slate-950 shadow-xs'
+                                : 'bg-rose-500 border-rose-500 text-white shadow-xs'
+                              : isDark
+                                ? 'bg-slate-950 border-slate-900 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                                : 'bg-white border-slate-150 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          <span className="text-base">📁</span>
+                          <span className="truncate w-full text-center">ทั้งหมด</span>
+                        </button>
+                        {(filterType === 'income' ? incomeCategories : filterType === 'expense' ? expenseCategories : [...incomeCategories, ...expenseCategories]).map((cat, idx) => {
+                          const isSelected = selectedCategoryFilter === cat.id;
+                          const keySuffix = incomeCategories.some(c => c.id === cat.id) ? 'inc' : 'exp';
+                          return (
+                            <button
+                              key={`${cat.id}-${keySuffix}-${idx}`}
+                              onClick={() => { setSelectedCategoryFilter(cat.id); setSelectedSubCategoryFilter('all'); }}
+                              className={`p-1.5 rounded-xl text-[10px] font-extrabold transition-all border flex flex-col items-center justify-center gap-1 min-h-[58px] text-center ${
+                                isSelected
+                                  ? isDark
+                                    ? 'bg-amber-500 border-amber-500 text-slate-950 shadow-xs'
+                                    : 'bg-rose-500 border-rose-500 text-white shadow-xs'
+                                  : isDark
+                                    ? 'bg-slate-950 border-slate-900 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                                    : 'bg-white border-slate-150 text-slate-600 hover:bg-slate-50'
+                              }`}
+                            >
+                              <span className="text-base select-none">{cat.emoji}</span>
+                              <span className="truncate w-full text-center">{cat.name}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </motion.div>
 
                   {/* Subcategory Filter (If category has subcategories) */}
                   {(() => {
@@ -2223,6 +2788,157 @@ export default function App() {
           </div>
         )}
 
+        {/* VIEW: KUMA FINANCIAL INSIGHTS */}
+        {activeTab === 'insights' && (
+          <div className="space-y-4 slide-up pb-6">
+            {/* Cute Header Card */}
+            <div className={`p-4 rounded-3xl border text-center relative overflow-hidden ${
+              isDark ? 'bg-slate-900/40 border-slate-800' : 'bg-white border-slate-100 shadow-sm'
+            }`}>
+              <div className="absolute top-2 right-2 opacity-15 text-5xl select-none pointer-events-none">🧠</div>
+              <div className="text-4xl mb-1.5 select-none animate-bounce">🧸💡</div>
+              <h2 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 font-sans">
+                คุมะคุงวิเคราะห์กระเป๋าเงินเชิงลึก 4 มิติ
+              </h2>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold mt-1">
+                ระบบคำนวณและวิเคราะห์พฤติกรรมการออม การใช้จ่าย และงบประมาณแบบเรียลไทม์
+              </p>
+            </div>
+
+            {/* Month Selector inside Insights */}
+            <div className={`p-3 rounded-2xl border flex items-center justify-between ${
+              isDark ? 'bg-slate-900/20 border-slate-900' : 'bg-slate-50 border-slate-100'
+            }`}>
+              <button 
+                onClick={handlePrevMonth}
+                className={`py-1.5 px-3 rounded-xl text-[10px] font-bold transition-all active:scale-90 ${
+                  isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-white text-slate-600 shadow-xs hover:bg-slate-100'
+                }`}
+              >
+                ◀ ก่อนหน้า
+              </button>
+              <div className="flex items-center gap-2 text-xs font-extrabold text-slate-800 dark:text-slate-100">
+                <Calendar size={13} className="text-rose-500 dark:text-amber-400" />
+                <span>ประจำเดือน: {thaiMonthName}</span>
+              </div>
+              <button 
+                onClick={handleNextMonth}
+                className={`py-1.5 px-3 rounded-xl text-[10px] font-bold transition-all active:scale-90 ${
+                  isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-white text-slate-600 shadow-xs hover:bg-slate-100'
+                }`}
+              >
+                ถัดไป ▶
+              </button>
+            </div>
+
+            {/* Dynamic 4 advice cards */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
+                  คำแนะนำทางการเงินแบบเฉพาะตัว
+                </span>
+                <span className="text-[9px] bg-emerald-500/10 text-emerald-500 font-bold px-2 py-0.5 rounded-full select-none">
+                  เรียลไทม์ (Real-time) ✨
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {kumaInsights.advicesList && kumaInsights.advicesList.map((adv) => (
+                  <div 
+                    key={adv.id}
+                    className={`p-3.5 rounded-3xl border text-xs flex gap-3 items-start transition-all hover:scale-[1.01] shadow-xs ${
+                      adv.status === 'warn' 
+                        ? 'bg-rose-500/10 border-rose-500/20 text-rose-700 dark:text-rose-300' 
+                        : adv.status === 'good'
+                          ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-300'
+                          : 'bg-amber-500/10 border-amber-500/20 text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    <span className="text-2xl select-none shrink-0 mt-0.5">{adv.emoji}</span>
+                    <div className="space-y-1">
+                      <h4 className="font-extrabold text-xs tracking-tight flex items-center gap-1.5">
+                        <span>{adv.title}</span>
+                      </h4>
+                      <p className="font-semibold leading-relaxed text-[11px] opacity-90">
+                        {adv.desc}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Analysis card for category distribution */}
+            <div className={`p-4 rounded-3xl border ${
+              isDark ? 'bg-slate-900/40 border-slate-800/80' : 'bg-white border-slate-100 shadow-sm'
+            }`}>
+              <div className="flex items-center gap-1.5 mb-3.5">
+                <span className="text-sm">📊</span>
+                <span className="text-xs font-extrabold text-slate-800 dark:text-slate-100 font-sans">
+                  สัดส่วนและอันดับค่าใช้จ่ายสูงสุดของเดือน
+                </span>
+              </div>
+
+              {kumaInsights.topExpenses.length > 0 ? (
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center text-[10px] text-slate-400 dark:text-slate-500 font-extrabold uppercase tracking-wider px-0.5">
+                    <span>อันดับค่าใช้จ่าย</span>
+                    <span>จำนวนเงิน / สัดส่วน (%)</span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {kumaInsights.topExpenses.map((exp, idx) => (
+                      <div 
+                        key={exp.id} 
+                        className={`p-3 rounded-2xl border space-y-2 transition-all ${
+                          isDark ? 'bg-slate-950/40 border-slate-900' : 'bg-slate-50/60 border-slate-100'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-xs font-bold">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-slate-400 font-extrabold w-4 h-4 bg-slate-200 dark:bg-slate-800 rounded-full flex items-center justify-center">{idx + 1}</span>
+                            <span className="text-base select-none">{exp.emoji}</span>
+                            <span className="text-slate-700 dark:text-slate-200">{exp.name}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-slate-800 dark:text-slate-100">฿{exp.amount.toLocaleString()}</span>
+                            <span className="text-[10px] text-slate-400 dark:text-slate-500 ml-1.5">({exp.percentage}%)</span>
+                          </div>
+                        </div>
+                        {/* Progress visual */}
+                        <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full rounded-full ${
+                              idx === 0 ? 'bg-rose-500' : idx === 1 ? 'bg-amber-500' : 'bg-sky-500'
+                            }`}
+                            style={{ width: `${exp.percentage}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Summary Footer */}
+                  <div className="pt-3 mt-3 border-t border-slate-100 dark:border-slate-800/80 space-y-1.5 text-[10px] text-slate-400 font-bold px-0.5">
+                    <div className="flex justify-between">
+                      <span>ยอดจ่ายรวมทั้งหมดในเดือนนี้:</span>
+                      <span className="text-rose-500 dark:text-rose-400 font-extrabold">฿{summaryTotals.expense.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>ยอดจ่ายเฉลี่ยเฉพาะวันที่ใช้จ่ายจริง:</span>
+                      <span className="text-slate-700 dark:text-slate-300 font-extrabold">฿{Math.round(kumaInsights.dailyAverage).toLocaleString()} / วัน</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-slate-400 dark:text-slate-500 text-xs italic">
+                  ไม่มีประวัติการใช้จ่ายในเดือนนี้เลยน้า บันทึกรายการเพื่อเริ่มการวิเคราะห์เชิงลึกจ้า 🧸✨
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* VIEW: SETTINGS & EXPORT */}
         {activeTab === 'settings' && (
           <div className="space-y-4 slide-up pb-6">
@@ -2536,12 +3252,12 @@ export default function App() {
       <nav className={`fixed bottom-0 left-0 right-0 z-40 border-t py-1.5 transition-colors duration-200 ${
         isDark ? 'bg-slate-950 border-slate-900' : `${currentTheme.cardBg} ${currentTheme.borderColor} shadow-lg`
       }`}>
-        <div className="max-w-md mx-auto px-6 flex justify-between items-center text-[10px] font-bold">
+        <div className="max-w-md mx-auto px-4 flex justify-between items-center text-[9px] font-bold">
           
           {/* Menu Home/Dashboard */}
           <button
             onClick={() => { setActiveTab('dashboard'); setEditingTransaction(null); }}
-            className={`flex flex-col items-center gap-1 py-1 px-3.5 transition-all ${
+            className={`flex flex-col items-center gap-1 py-1 px-2 transition-all ${
               activeTab === 'dashboard'
                 ? `scale-105 ${currentTheme.accent.split(' ')[0]}`
                 : 'text-slate-400 hover:text-slate-500'
@@ -2551,51 +3267,64 @@ export default function App() {
             <span>หน้าหลัก</span>
           </button>
 
-          {/* Menu Add Transaction */}
-          <button
-            onClick={() => { setActiveTab('add'); setDefaultAddDate(undefined); }}
-            className={`flex flex-col items-center gap-1 py-1 px-3.5 transition-all ${
-              activeTab === 'add'
-                ? `scale-105 ${currentTheme.accent.split(' ')[0]}`
-                : 'text-slate-400 hover:text-slate-500'
-            }`}
-          >
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 -mt-3.5 shadow-md border-3 transition-transform ${
-              currentTheme.primary.split(' ')[0]
-            } ${
-              currentTheme.primary.split(' ')[1]
-            } ${
-              isDark ? 'border-slate-950' : 'border-white'
-            }`}>
-              <Plus size={18} />
-            </div>
-            <span>จดบัญชี</span>
-          </button>
-
           {/* Menu Stats */}
           <button
             onClick={() => { setActiveTab('stats'); setEditingTransaction(null); }}
-            className={`flex flex-col items-center gap-1 py-1 px-3.5 transition-all ${
+            className={`flex flex-col items-center gap-1 py-1 px-2 transition-all ${
               activeTab === 'stats'
                 ? `scale-105 ${currentTheme.accent.split(' ')[0]}`
                 : 'text-slate-400 hover:text-slate-500'
             }`}
           >
             <BarChart2 size={18} />
-            <span>กราฟสถิติ</span>
+            <span>สถิติ</span>
+          </button>
+
+          {/* Menu Add Transaction (Middle Button) */}
+          <button
+            onClick={() => { setActiveTab('add'); setDefaultAddDate(undefined); }}
+            className={`flex flex-col items-center gap-1 py-1 px-2 transition-all ${
+              activeTab === 'add'
+                ? `scale-105 ${currentTheme.accent.split(' ')[0]}`
+                : 'text-slate-400 hover:text-slate-500'
+            }`}
+          >
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 -mt-3 shadow-md border-3 transition-transform ${
+              currentTheme.primary.split(' ')[0]
+            } ${
+              currentTheme.primary.split(' ')[1]
+            } ${
+              isDark ? 'border-slate-950' : 'border-white'
+            }`}>
+              <Plus size={18} className="text-white" />
+            </div>
+            <span>จดบัญชี</span>
+          </button>
+
+          {/* Menu Insights (New Tab) */}
+          <button
+            onClick={() => { setActiveTab('insights'); setEditingTransaction(null); }}
+            className={`flex flex-col items-center gap-1 py-1 px-2 transition-all ${
+              activeTab === 'insights'
+                ? `scale-105 ${currentTheme.accent.split(' ')[0]}`
+                : 'text-slate-400 hover:text-slate-500'
+            }`}
+          >
+            <Lightbulb size={18} />
+            <span>คุมะวิเคราะห์</span>
           </button>
 
           {/* Menu Settings */}
           <button
             onClick={() => { setActiveTab('settings'); setEditingTransaction(null); }}
-            className={`flex flex-col items-center gap-1 py-1 px-3.5 transition-all ${
+            className={`flex flex-col items-center gap-1 py-1 px-2 transition-all ${
               activeTab === 'settings'
                 ? `scale-105 ${currentTheme.accent.split(' ')[0]}`
                 : 'text-slate-400 hover:text-slate-500'
             }`}
           >
             <Settings size={18} />
-            <span>ตั้งค่า&ส่งออก</span>
+            <span>ตั้งค่า</span>
           </button>
 
         </div>
@@ -2707,6 +3436,336 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* 🎯 MODAL: SET BUDGET */}
+      {isBudgetModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className={`w-full max-w-sm rounded-3xl p-5 border shadow-xl ${
+            isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-100 text-slate-800'
+          }`}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-sm font-extrabold flex items-center gap-1.5">
+                <span>🎯 ตั้งงบรายจ่ายรายเดือน</span>
+              </h3>
+              <button 
+                onClick={() => setIsBudgetModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-all"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 mb-4 font-semibold">
+              กำหนดเป้าหมายค่าใช้จ่ายสำหรับเดือนนี้เพื่อให้คุมะคุงช่วยเตือนเมื่อคุณเริ่มใช้เยอะเกินไปนะค้าบ 🧸
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1">จำนวนเงินงบประมาณ (บาท)</label>
+                <input 
+                  type="number"
+                  placeholder="เช่น 10000"
+                  value={budgetInputValue}
+                  onChange={(e) => setBudgetInputValue(e.target.value)}
+                  className={`w-full p-2.5 rounded-xl text-xs font-bold border outline-hidden transition-all ${
+                    isDark 
+                      ? 'bg-slate-900 border-slate-800 text-white focus:border-amber-500' 
+                      : 'bg-slate-50 border-slate-150 text-slate-800 focus:border-rose-500'
+                  }`}
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={() => setIsBudgetModalOpen(false)}
+                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
+                    isDark ? 'bg-slate-900 hover:bg-slate-850' : 'bg-slate-100 hover:bg-slate-150'
+                  }`}
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  onClick={() => {
+                    const amount = parseFloat(budgetInputValue);
+                    if (isNaN(amount) || amount <= 0) {
+                      addToast('กรุณากรอกจำนวนเงินให้ถูกต้องและมากกว่า 0 นะค้าบ 🧸💧', 'error');
+                      return;
+                    }
+                    const nextBudgets = { ...monthlyBudgets };
+                    nextBudgets[selectedMonth] = amount;
+                    setMonthlyBudgets(nextBudgets);
+                    setIsBudgetModalOpen(false);
+                    triggerMascotReaction('celebrate', `ตั้งงบประมาณรายจ่ายเดือนนี้เรียบร้อยแล้วน้าคุมะ! ยอดรวมคือ ฿${amount.toLocaleString()} สู้ๆ นะค้าบ 🎉🧸🏆`);
+                    addToast('ตั้งงบประมาณเรียบร้อยแล้วคุมะ! 🎉', 'success');
+                  }}
+                  className={`flex-1 py-2 rounded-xl text-xs font-bold text-white transition-all hover:opacity-90 ${
+                    selectedThemeId === 'cherry' ? 'bg-rose-500' :
+                    selectedThemeId === 'matcha' ? 'bg-emerald-500' :
+                    selectedThemeId === 'blueberry' ? 'bg-sky-500' :
+                    selectedThemeId === 'peach' ? 'bg-amber-500' :
+                    selectedThemeId === 'natural' ? 'bg-[#7B9978]' : 'bg-slate-800'
+                  }`}
+                >
+                  บันทึกงบ
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🎯 MODAL: ADD SAVINGS GOAL */}
+      {isSavingsModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className={`w-full max-w-sm rounded-3xl p-5 border shadow-xl ${
+            isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-100 text-slate-800'
+          }`}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-sm font-extrabold flex items-center gap-1.5">
+                <span>🎯 สร้างเป้าหมายการออมเงินใหม่</span>
+              </h3>
+              <button 
+                onClick={() => setIsSavingsModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-all"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1">อิโมจิเป้าหมาย</label>
+                <div className="flex gap-1.5 overflow-x-auto py-1">
+                  {['🎯', '✈️', '🏕️', '📱', '💻', '🚗', '🏠', '🎮', '🏍️', '☕', '🍩', '🛍️'].map(emo => (
+                    <button
+                      key={emo}
+                      onClick={() => setNewGoalEmoji(emo)}
+                      className={`text-lg p-2 rounded-xl transition-all border ${
+                        newGoalEmoji === emo 
+                          ? isDark ? 'bg-amber-500/20 border-amber-500' : 'bg-rose-500/10 border-rose-500' 
+                          : 'border-transparent'
+                      }`}
+                    >
+                      {emo}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1">ชื่อเป้าหมาย</label>
+                <input 
+                  type="text"
+                  placeholder="เช่น เที่ยวญี่ปุ่น, ซื้อนินเทนโดสวิตช์"
+                  value={newGoalName}
+                  onChange={(e) => setNewGoalName(e.target.value)}
+                  className={`w-full p-2.5 rounded-xl text-xs font-bold border outline-hidden transition-all ${
+                    isDark 
+                      ? 'bg-slate-900 border-slate-800 text-white focus:border-amber-500' 
+                      : 'bg-slate-50 border-slate-150 text-slate-800 focus:border-rose-500'
+                  }`}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1">ยอดเป้าหมาย (บาท)</label>
+                  <input 
+                    type="number"
+                    placeholder="เช่น 10000"
+                    value={newGoalTarget}
+                    onChange={(e) => setNewGoalTarget(e.target.value)}
+                    className={`w-full p-2.5 rounded-xl text-xs font-bold border outline-hidden transition-all ${
+                      isDark 
+                        ? 'bg-slate-900 border-slate-800 text-white focus:border-amber-500' 
+                        : 'bg-slate-50 border-slate-150 text-slate-800 focus:border-rose-500'
+                    }`}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1">ยอดเริ่มต้นสะสม (บาท)</label>
+                  <input 
+                    type="number"
+                    placeholder="เช่น 0 หรือ 500"
+                    value={newGoalCurrent}
+                    onChange={(e) => setNewGoalCurrent(e.target.value)}
+                    className={`w-full p-2.5 rounded-xl text-xs font-bold border outline-hidden transition-all ${
+                      isDark 
+                        ? 'bg-slate-900 border-slate-800 text-white focus:border-amber-500' 
+                        : 'bg-slate-50 border-slate-150 text-slate-800 focus:border-rose-500'
+                    }`}
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={() => setIsSavingsModalOpen(false)}
+                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
+                    isDark ? 'bg-slate-900 hover:bg-slate-850' : 'bg-slate-100 hover:bg-slate-150'
+                  }`}
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  onClick={() => {
+                    const targetAmt = parseFloat(newGoalTarget);
+                    const currentAmt = parseFloat(newGoalCurrent || '0');
+                    if (!newGoalName.trim()) {
+                      addToast('กรุณากรอกชื่อเป้าหมายด้วยนะค้าบ 🧸', 'error');
+                      return;
+                    }
+                    if (isNaN(targetAmt) || targetAmt <= 0) {
+                      addToast('ยอดเป้าหมายต้องมากกว่า 0 นะค้าบ 🧸💧', 'error');
+                      return;
+                    }
+                    if (isNaN(currentAmt) || currentAmt < 0) {
+                      addToast('ยอดสะสมเริ่มต้นต้องไม่ติดลบน้า 🧸', 'error');
+                      return;
+                    }
+
+                    const nextGoal: SavingsGoal = {
+                      id: 'goal-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9),
+                      name: newGoalName.trim(),
+                      targetAmount: targetAmt,
+                      currentAmount: currentAmt,
+                      emoji: newGoalEmoji,
+                      createdAt: Date.now()
+                    };
+
+                    setSavingsGoals(prev => [nextGoal, ...prev]);
+                    setIsSavingsModalOpen(false);
+                    triggerMascotReaction('celebrate', `ว้าว! สร้างเป้าหมายการออม "${newGoalEmoji} ${newGoalName.trim()}" สำเร็จแล้วน้าคุมะ ขอให้เก็บออมได้ไวๆ คุมะคุงคอยเชียร์น้า 🎉🧸🌟`);
+                    addToast('สร้างเป้าหมายการออมเงินใหม่เรียบร้อยแล้ว! 🎉', 'success');
+                  }}
+                  className={`flex-1 py-2 rounded-xl text-xs font-bold text-white transition-all hover:opacity-90 ${
+                    selectedThemeId === 'cherry' ? 'bg-rose-500' :
+                    selectedThemeId === 'matcha' ? 'bg-emerald-500' :
+                    selectedThemeId === 'blueberry' ? 'bg-sky-500' :
+                    selectedThemeId === 'peach' ? 'bg-amber-500' :
+                    selectedThemeId === 'natural' ? 'bg-[#7B9978]' : 'bg-slate-800'
+                  }`}
+                >
+                  สร้างเป้าหมาย
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🎯 MODAL: GOAL ACTION (DEPOSIT / WITHDRAW) */}
+      {isGoalActionModalOpen && (() => {
+        const goal = savingsGoals.find(g => g.id === activeGoalId);
+        if (!goal) return null;
+        return (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+            <div className={`w-full max-w-sm rounded-3xl p-5 border shadow-xl ${
+              isDark ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-100 text-slate-800'
+            }`}>
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-sm font-extrabold flex items-center gap-1.5">
+                  <span>{goalActionType === 'deposit' ? '💰 ฝากเงินเข้าเป้าหมาย' : '💸 ถอนเงินจากเป้าหมาย'}</span>
+                </h3>
+                <button 
+                  onClick={() => setIsGoalActionModalOpen(false)}
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-all"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="bg-slate-100 dark:bg-slate-900 p-2.5 rounded-xl text-center mb-3 text-xs">
+                <span className="text-base select-none mr-1.5">{goal.emoji}</span>
+                <span className="font-extrabold">{goal.name}</span>
+                <span className="block text-[10px] text-slate-400 mt-1 font-bold">
+                  สะสมอยู่: ฿{goal.currentAmount.toLocaleString()} / ฿{goal.targetAmount.toLocaleString()}
+                </span>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1">จำนวนเงิน (บาท)</label>
+                  <input 
+                    type="number"
+                    placeholder="ใส่จำนวนเงินที่นี่..."
+                    value={goalActionAmount}
+                    onChange={(e) => setGoalActionAmount(e.target.value)}
+                    className={`w-full p-2.5 rounded-xl text-xs font-bold border outline-hidden transition-all ${
+                      isDark 
+                        ? 'bg-slate-900 border-slate-800 text-white focus:border-amber-500' 
+                        : 'bg-slate-50 border-slate-150 text-slate-800 focus:border-rose-500'
+                    }`}
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    onClick={() => setIsGoalActionModalOpen(false)}
+                    className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
+                      isDark ? 'bg-slate-900 hover:bg-slate-850' : 'bg-slate-100 hover:bg-slate-150'
+                    }`}
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    onClick={() => {
+                      const amount = parseFloat(goalActionAmount);
+                      if (isNaN(amount) || amount <= 0) {
+                        addToast('กรุณากรอกจำนวนเงินให้ถูกต้องและมากกว่า 0 นะค้าบ 🧸💧', 'error');
+                        return;
+                      }
+
+                      let nextAmt = goal.currentAmount;
+                      if (goalActionType === 'deposit') {
+                        nextAmt += amount;
+                      } else {
+                        if (amount > goal.currentAmount) {
+                          addToast('ถอนเงินออกมากกว่ายอดสะสมที่มีไม่ได้นะคุมะ! 🧸💧', 'error');
+                          return;
+                        }
+                        nextAmt -= amount;
+                      }
+
+                      // Check if complete
+                      const completedJustNow = goalActionType === 'deposit' && nextAmt >= goal.targetAmount && goal.currentAmount < goal.targetAmount;
+
+                      setSavingsGoals(prev => prev.map(g => {
+                        if (g.id === goal.id) {
+                          return { ...g, currentAmount: nextAmt };
+                        }
+                        return g;
+                      }));
+
+                      setIsGoalActionModalOpen(false);
+
+                      if (completedJustNow) {
+                        triggerMascotReaction('celebrate', `🌟 ยินดีด้วยอย่างยิ่งเลยค้าบ!! เป้าหมายออมเงิน "${goal.emoji} ${goal.name}" สำเร็จครบ 100% เรียบร้อยแล้วน้าเก่งและวิเศษมากๆ คุมะคุงภูมิใจในตัวคุณฝุดๆ เลยค้าบ! 🎉🕶️🧸🏆✨`);
+                        addToast(`เป้าหมาย ${goal.name} บรรลุความสำเร็จแล้ว! 🎉`, 'success');
+                      } else {
+                        const message = goalActionType === 'deposit' 
+                          ? `ฝากเงิน ฿${amount.toLocaleString()} สำเร็จแล้วคุมะ! ตอนนี้สะสมได้ ฿${nextAmt.toLocaleString()} แล้วน้า สู้ๆ ต่อไปค้าบ 🎉🧸`
+                          : `ถอนเงิน ฿${amount.toLocaleString()} จากเป้าหมายเรียบร้อยแล้วจ้า เหลือยอดออมสะสมคือ ฿${nextAmt.toLocaleString()} น้า 💸`;
+                        triggerMascotReaction('happy', message);
+                        addToast('อัปเดตเป้าหมายเงินออมเรียบร้อยแล้วคุมะ! 🎉', 'success');
+                      }
+                    }}
+                    className={`flex-1 py-2 rounded-xl text-xs font-bold text-white transition-all hover:opacity-90 ${
+                      selectedThemeId === 'cherry' ? 'bg-rose-500' :
+                      selectedThemeId === 'matcha' ? 'bg-emerald-500' :
+                      selectedThemeId === 'blueberry' ? 'bg-sky-500' :
+                      selectedThemeId === 'peach' ? 'bg-amber-500' :
+                      selectedThemeId === 'natural' ? 'bg-[#7B9978]' : 'bg-slate-800'
+                    }`}
+                  >
+                    ยืนยัน
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Custom Username & Password Authentication Modal */}
       <AuthModal

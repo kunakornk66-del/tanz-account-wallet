@@ -348,6 +348,14 @@ export async function loginWithGoogle(syncKey: string): Promise<AuthResult> {
     }
 
     const email = user.email.toLowerCase();
+    
+    // Save shopEmail in localStorage as requested
+    try {
+      localStorage.setItem('shopEmail', email);
+    } catch (e) {
+      console.warn('LocalStorage error:', e);
+    }
+
     const cleanUsername = email.replace(/[@.]/g, '_');
     const userRef = doc(db, 'kuma_users', cleanUsername);
     const userSnap = await getDoc(userRef);

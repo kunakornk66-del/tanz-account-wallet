@@ -44,3 +44,13 @@ export interface ReminderSettings {
   message: string;
   days: number[]; // 0 = Sunday, 1 = Monday, etc.
 }
+
+export interface SavingsGoal {
+  id: string;
+  name: string;
+  targetAmount: number;
+  currentAmount: number;
+  emoji: string;
+  createdAt: number;
+}
+
