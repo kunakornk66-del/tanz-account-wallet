@@ -57,7 +57,7 @@ Analyze the attached Thai bank transfer slip and extract:
 Return strictly valid JSON corresponding to the requested schema.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         contents: [
           {
             inlineData: {
