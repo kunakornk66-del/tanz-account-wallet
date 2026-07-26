@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Transaction, TransactionType } from '../types';
 import { CategoryInfo } from '../themes';
-import { Calendar, Clock, DollarSign, Edit3, Plus, Sparkles, Tag, X, Paperclip, Trash2, Image as ImageIcon, Check, AlertCircle, FileText } from 'lucide-react';
+import { Calendar, Clock, DollarSign, Edit3, Plus, Sparkles, Tag, X, Paperclip, Trash2, Image as ImageIcon, Check, AlertCircle, FileText, Repeat } from 'lucide-react';
 
 interface TransactionFormProps {
   onSave: (transaction: Omit<Transaction, 'id' | 'createdAt'> & { id?: string }) => void;
@@ -52,6 +52,7 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
   const [slipImages, setSlipImages] = useState<string[]>([]);
   const [subCategory, setSubCategory] = useState<string>('');
   const [isScanning, setIsScanning] = useState<boolean>(false);
+  const [isRecurring, setIsRecurring] = useState<boolean>(false);
 
   // State to hold the OCR result preview before applying
   const [ocrPreview, setOcrPreview] = useState<{
@@ -224,6 +225,7 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
       setDescription(editingTransaction.description);
       setDate(editingTransaction.date);
       setTime(editingTransaction.time);
+      setIsRecurring(editingTransaction.isRecurring || false);
       
       // Handle backward compatibility for single slipImage vs multiple slipImages
       if (editingTransaction.slipImages && editingTransaction.slipImages.length > 0) {
@@ -239,6 +241,7 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
       setDescription('');
       setSlipImages([]);
       setSubCategory('');
+      setIsRecurring(false);
       setDate(defaultDate || getLocalDateString());
       if (categories.length > 0) {
         setCategory(categories[0].id);
@@ -323,6 +326,8 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
       return;
     }
 
+    const selectedDay = parseInt(date.split('-')[2], 10) || 1;
+
     onSave({
       id: editingTransaction?.id,
       type,
@@ -333,7 +338,9 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
       date,
       time,
       slipImage: slipImages[0] || undefined,
-      slipImages: slipImages.length > 0 ? slipImages : undefined
+      slipImages: slipImages.length > 0 ? slipImages : undefined,
+      isRecurring: type === 'expense' ? isRecurring : false,
+      recurringDay: (type === 'expense' && isRecurring) ? selectedDay : undefined
     });
 
     // Reset fields if adding new
@@ -341,6 +348,7 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
       setAmount('');
       setDescription('');
       setSubCategory('');
+      setIsRecurring(false);
       setDate(getLocalDateString());
       setTime(getLocalTimeString());
       setSlipImages([]);
@@ -595,6 +603,55 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
           />
         </div>
       </div>
+
+      {/* Recurring Expense Toggle */}
+      {type === 'expense' && (
+        <div className={`p-3.5 rounded-2xl border transition-all flex items-center justify-between ${
+          isDark 
+            ? isRecurring ? 'bg-rose-950/20 border-rose-800/60' : 'bg-slate-900/60 border-slate-800' 
+            : isRecurring ? 'bg-rose-50/80 border-rose-200' : 'bg-slate-50/60 border-slate-200/70'
+        }`}>
+          <div className="flex items-center gap-3 pr-2">
+            <div className={`p-2.5 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+              isRecurring
+                ? 'bg-rose-500 text-white shadow-xs'
+                : isDark ? 'bg-slate-800 text-slate-400' : 'bg-slate-200/80 text-slate-500'
+            }`}>
+              <Repeat size={18} className={isRecurring ? 'animate-spin-slow' : ''} />
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className={`text-xs font-black ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
+                  ตั้งเป็นรายจ่ายประจำเดือน 🔄
+                </span>
+                {isRecurring && (
+                  <span className="text-[9px] font-extrabold bg-rose-500 text-white px-1.5 py-0.2 rounded-md">
+                    ทุกเดือน
+                  </span>
+                )}
+              </div>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-tight mt-0.5">
+                {isRecurring
+                  ? `ระบบจะบันทึกรายจ่ายนี้ให้อัตโนมัติทุกวันที่ ${parseInt(date.split('-')[2], 10) || 1} ของทุกเดือนถัดไป`
+                  : 'สร้างรายการนี้ซ้ำอัตโนมัติในวันเดียวกันของทุกๆ เดือนถัดไป'}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsRecurring(!isRecurring)}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+              isRecurring ? 'bg-rose-500' : isDark ? 'bg-slate-700' : 'bg-slate-300'
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                isRecurring ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+      )}
 
       {/* Optional Slip Attachment */}
       <div className={`p-3 rounded-2xl border ${

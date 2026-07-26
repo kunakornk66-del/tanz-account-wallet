@@ -15,6 +15,9 @@ import {
   generateSyncKey, 
   uploadTransactionsToCloud, 
   downloadTransactionsFromCloud, 
+  uploadUserProfileToCloud,
+  downloadUserProfileFromCloud,
+  clearAllCloudData,
   verifySyncKey,
   validateUsername,
   signUpUser,
@@ -22,7 +25,11 @@ import {
   uploadCategoriesToCloud,
   downloadCategoriesFromCloud,
   uploadThemeToCloud,
-  downloadThemeFromCloud
+  downloadThemeFromCloud,
+  subscribeToTransactions,
+  subscribeToProfile,
+  saveTransactionToCloud,
+  deleteTransactionFromCloud
 } from './firebase';
 import { 
   Wallet, 
@@ -59,7 +66,8 @@ import {
   Download,
   List,
   Smartphone,
-  Lightbulb
+  Lightbulb,
+  Repeat
 } from 'lucide-react';
 
 // No initial transactions - start completely fresh
@@ -187,11 +195,17 @@ export default function App() {
   // Trigger local storage save whenever budget or savings goal changes
   useEffect(() => {
     localStorage.setItem('kuma_monthly_budgets', JSON.stringify(monthlyBudgets));
-  }, [monthlyBudgets]);
+    if (syncKey) {
+      uploadUserProfileToCloud(syncKey, { monthlyBudgets });
+    }
+  }, [monthlyBudgets, syncKey]);
 
   useEffect(() => {
     localStorage.setItem('kuma_savings_goals', JSON.stringify(savingsGoals));
-  }, [savingsGoals]);
+    if (syncKey) {
+      uploadUserProfileToCloud(syncKey, { savingsGoals });
+    }
+  }, [savingsGoals, syncKey]);
 
 
   // PWA installation states
@@ -415,6 +429,210 @@ export default function App() {
     }
   }, []);
 
+  // --- Refs for Real-time Listener state comparison ---
+  const transactionsRef = React.useRef(transactions);
+  transactionsRef.current = transactions;
+
+  const selectedThemeIdRef = React.useRef(selectedThemeId);
+  selectedThemeIdRef.current = selectedThemeId;
+
+  const incomeCategoriesRef = React.useRef(incomeCategories);
+  incomeCategoriesRef.current = incomeCategories;
+
+  const expenseCategoriesRef = React.useRef(expenseCategories);
+  expenseCategoriesRef.current = expenseCategories;
+
+  const monthlyBudgetsRef = React.useRef(monthlyBudgets);
+  monthlyBudgetsRef.current = monthlyBudgets;
+
+  const savingsGoalsRef = React.useRef(savingsGoals);
+  savingsGoalsRef.current = savingsGoals;
+
+  // --- Real-Time Sync Listener across Devices (Phone, Tablet, PC) ---
+  useEffect(() => {
+    if (!syncKey) return;
+
+    let isSubscribed = true;
+
+    // 1. Subscribe to real-time transaction updates from Cloud
+    const unsubscribeTx = subscribeToTransactions(syncKey, (cloudTxList) => {
+      if (!isSubscribed) return;
+
+      const cloudJson = JSON.stringify(cloudTxList);
+      const currentJson = JSON.stringify(transactionsRef.current);
+
+      if (cloudJson !== currentJson) {
+        setTransactions(cloudTxList);
+        localStorage.setItem('kuma_transactions', cloudJson);
+        const now = Date.now();
+        setLastSyncedAt(now);
+        localStorage.setItem('kuma_last_synced', now.toString());
+      }
+    });
+
+    // 2. Subscribe to real-time profile/categories/theme/budgets/goals updates from Cloud
+    const unsubscribeProfile = subscribeToProfile(syncKey, (profileData) => {
+      if (!isSubscribed) return;
+
+      if (profileData.themeId && profileData.themeId !== selectedThemeIdRef.current) {
+        setSelectedThemeId(profileData.themeId as ThemeType);
+        localStorage.setItem('kuma_theme', profileData.themeId);
+      }
+
+      if (profileData.incomeCategories && profileData.expenseCategories) {
+        const incJson = JSON.stringify(profileData.incomeCategories);
+        const expJson = JSON.stringify(profileData.expenseCategories);
+        const currentIncJson = JSON.stringify(incomeCategoriesRef.current);
+        const currentExpJson = JSON.stringify(expenseCategoriesRef.current);
+
+        if (incJson !== currentIncJson || expJson !== currentExpJson) {
+          setIncomeCategories(profileData.incomeCategories);
+          setExpenseCategories(profileData.expenseCategories);
+          localStorage.setItem('kuma_income_categories', incJson);
+          localStorage.setItem('kuma_expense_categories', expJson);
+        }
+      }
+
+      if (profileData.monthlyBudgets !== undefined) {
+        const budgetsJson = JSON.stringify(profileData.monthlyBudgets);
+        const currentBudgetsJson = JSON.stringify(monthlyBudgetsRef.current);
+        if (budgetsJson !== currentBudgetsJson) {
+          setMonthlyBudgets(profileData.monthlyBudgets);
+          localStorage.setItem('kuma_monthly_budgets', budgetsJson);
+        }
+      }
+
+      if (profileData.savingsGoals !== undefined) {
+        const goalsJson = JSON.stringify(profileData.savingsGoals);
+        const currentGoalsJson = JSON.stringify(savingsGoalsRef.current);
+        if (goalsJson !== currentGoalsJson) {
+          setSavingsGoals(profileData.savingsGoals);
+          localStorage.setItem('kuma_savings_goals', goalsJson);
+        }
+      }
+    });
+
+    return () => {
+      isSubscribed = false;
+      unsubscribeTx();
+      unsubscribeProfile();
+    };
+  }, [syncKey, loggedInUser]);
+
+  // --- Automatic Recurring Expenses Generator ---
+  const processRecurringTransactions = (currentTxList: Transaction[]): { updatedList: Transaction[]; generatedCount: number } => {
+    if (!currentTxList || currentTxList.length === 0) {
+      return { updatedList: currentTxList, generatedCount: 0 };
+    }
+
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth() + 1; // 1-12
+    const currentDay = today.getDate();
+
+    const newGeneratedTx: Transaction[] = [];
+
+    // Filter all expense transactions marked as isRecurring
+    const recurringParents = currentTxList.filter(tx => tx.isRecurring && tx.type === 'expense');
+
+    for (const parent of recurringParents) {
+      if (!parent.date) continue;
+
+      const parts = parent.date.split('-');
+      if (parts.length < 3) continue;
+
+      const startYear = parseInt(parts[0], 10);
+      const startMonth = parseInt(parts[1], 10);
+      const targetDay = parent.recurringDay || parseInt(parts[2], 10) || 1;
+
+      if (isNaN(startYear) || isNaN(startMonth)) continue;
+
+      let y = startYear;
+      let m = startMonth + 1;
+      if (m > 12) {
+        m = 1;
+        y += 1;
+      }
+
+      while (y < currentYear || (y === currentYear && m <= currentMonth)) {
+        // If target month is current month, check if current day >= targetDay
+        if (y === currentYear && m === currentMonth && currentDay < targetDay) {
+          break;
+        }
+
+        const monthStr = String(m).padStart(2, '0');
+        const targetPrefix = `${y}-${monthStr}`;
+
+        // Check if a generated transaction already exists for this parent in this target year and month
+        const alreadyExists = currentTxList.some(tx => 
+          (tx.recurringParentId === parent.id || (tx.id === parent.id && tx.date.startsWith(targetPrefix))) &&
+          tx.date.startsWith(targetPrefix)
+        ) || newGeneratedTx.some(tx => 
+          tx.recurringParentId === parent.id && tx.date.startsWith(targetPrefix)
+        );
+
+        if (!alreadyExists) {
+          const maxDaysInMonth = new Date(y, m, 0).getDate();
+          const actualDay = Math.min(targetDay, maxDaysInMonth);
+          const actualDayStr = String(actualDay).padStart(2, '0');
+          const generatedDate = `${y}-${monthStr}-${actualDayStr}`;
+
+          const newTx: Transaction = {
+            id: 'tx_rec_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+            type: parent.type,
+            amount: parent.amount,
+            category: parent.category,
+            subCategory: parent.subCategory,
+            description: parent.description ? `${parent.description} (รายการประจำเดือน)` : 'รายจ่ายประจำเดือน',
+            date: generatedDate,
+            time: parent.time || '08:00',
+            createdAt: Date.now(),
+            slipImage: parent.slipImage,
+            slipImages: parent.slipImages,
+            recurringParentId: parent.id,
+            isRecurring: false
+          };
+
+          newGeneratedTx.push(newTx);
+        }
+
+        m++;
+        if (m > 12) {
+          m = 1;
+          y++;
+        }
+      }
+    }
+
+    if (newGeneratedTx.length > 0) {
+      const updatedList = [...newGeneratedTx, ...currentTxList];
+      updatedList.sort((a, b) => {
+        if (b.date !== a.date) {
+          return b.date.localeCompare(a.date);
+        }
+        return b.createdAt - a.createdAt;
+      });
+      return { updatedList, generatedCount: newGeneratedTx.length };
+    }
+
+    return { updatedList: currentTxList, generatedCount: 0 };
+  };
+
+  // Run recurring expenses check whenever transactions state is set/loaded
+  useEffect(() => {
+    if (transactions && transactions.length > 0) {
+      const { updatedList, generatedCount } = processRecurringTransactions(transactions);
+      if (generatedCount > 0) {
+        setTransactions(updatedList);
+        localStorage.setItem('kuma_transactions', JSON.stringify(updatedList));
+        addToast(`คุมะคุงช่วยบันทึกรายจ่ายประจำเดือนให้อัตโนมัติ ${generatedCount} รายการเรียบร้อยครับ! 🔄🧸✨`, 'success');
+        if (syncKey) {
+          triggerAutoCloudBackup(updatedList);
+        }
+      }
+    }
+  }, [transactions]);
+
   // --- Auto-trigger background Firestore backups on Transaction modifications ---
   const triggerAutoCloudBackup = async (updatedTx: Transaction[]) => {
     if (!syncKey) return;
@@ -449,30 +667,24 @@ export default function App() {
       setIsSyncing(true);
       addToast('กำลังดึงข้อมูลกระเป๋าเงินของคุณจากระบบคลาวด์... 🧸☁️', 'info');
       
-      const timeoutMs = 4500; // 4.5s is standard to avoid feeling stuck
+      const timeoutMs = 5000; // 5s timeout
       
       const txPromise = downloadTransactionsFromCloud(userSyncKey);
-      const catsPromise = downloadCategoriesFromCloud(userSyncKey);
-      const themePromise = downloadThemeFromCloud(userSyncKey);
+      const profilePromise = downloadUserProfileFromCloud(userSyncKey);
 
       const downloadedTx = await Promise.race([
         txPromise,
         new Promise<string>((resolve) => setTimeout(() => resolve('TIMEOUT'), timeoutMs))
       ]);
 
-      const downloadedCats = await Promise.race([
-        catsPromise,
-        new Promise<string>((resolve) => setTimeout(() => resolve('TIMEOUT'), timeoutMs))
-      ]);
-
-      const downloadedTheme = await Promise.race([
-        themePromise,
+      const downloadedProfile = await Promise.race([
+        profilePromise,
         new Promise<string>((resolve) => setTimeout(() => resolve('TIMEOUT'), timeoutMs))
       ]);
       
       setIsSyncing(false);
 
-      const isTimeout = downloadedTx === 'TIMEOUT' || downloadedCats === 'TIMEOUT' || downloadedTheme === 'TIMEOUT';
+      const isTimeout = downloadedTx === 'TIMEOUT' || downloadedProfile === 'TIMEOUT';
 
       if (isTimeout) {
         addToast('⚡ เชื่อมต่อระบบคลาวด์ล่าช้า คุมะคุงขอเข้าใช้งานแบบออฟไลน์ให้ก่อนนะครับ ไม่ต้องห่วง ข้อมูลปลอดภัยในระบบแน่นอนครับ! 🧸💼☁️', 'sync');
@@ -482,63 +694,61 @@ export default function App() {
       }
 
       const finalTx = downloadedTx as Transaction[] | null;
-      const finalCats = downloadedCats as { incomeCategories: any[], expenseCategories: any[] } | null;
-      const finalTheme = downloadedTheme as string | null;
-      
-      // 1. Recover/sync theme
-      if (finalTheme) {
-        setSelectedThemeId(finalTheme as ThemeType);
-        localStorage.setItem('kuma_theme', finalTheme);
-      } else {
-        // Back up current theme if they don't have one saved on cloud yet
-        const currentThemeId = localStorage.getItem('kuma_theme') || 'warm-rose';
-        await uploadThemeToCloud(userSyncKey, currentThemeId);
-      }
+      const finalProfile = downloadedProfile as {
+        themeId?: string;
+        incomeCategories?: any[];
+        expenseCategories?: any[];
+        monthlyBudgets?: Record<string, number>;
+        savingsGoals?: any[];
+      } | null;
 
-      // 2. Recover/sync transactions using ID deduplication so guest/local data is merged
-      let finalTxList: Transaction[] = [];
-      if (finalTx !== null && finalTx.length > 0) {
-        const localTx = transactions || [];
-        const combined = [...finalTx, ...localTx];
-        const uniqueMap = new Map();
-        combined.forEach(t => {
-          if (!uniqueMap.has(t.id)) {
-            uniqueMap.set(t.id, t);
-          }
-        });
-        finalTxList = Array.from(uniqueMap.values()) as Transaction[];
-        finalTxList.sort((a, b) => b.createdAt - a.createdAt);
-        
-        setTransactions(finalTxList);
-        localStorage.setItem('kuma_transactions', JSON.stringify(finalTxList));
-        addToast('ดึงข้อมูลบัญชีและซิงค์ข้อมูลเสร็จเรียบร้อยแล้วค้าบ! ✨🧸', 'success');
-        
-        // Update cloud with the merged dataset
-        await uploadTransactionsToCloud(userSyncKey, finalTxList);
-      } else {
-        // Cloud has no transactions. If we have local transactions, upload them!
-        const localTx = transactions || [];
-        if (localTx.length > 0) {
-          setTransactions(localTx);
-          localStorage.setItem('kuma_transactions', JSON.stringify(localTx));
-          await uploadTransactionsToCloud(userSyncKey, localTx);
-          addToast('ซิงค์ข้อมูลรายการของคุณขึ้นระบบคลาวด์เรียบร้อยแล้วครับ! 🧸☁️', 'success');
-        } else {
-          setTransactions([]);
-          localStorage.setItem('kuma_transactions', JSON.stringify([]));
-          addToast('ยินดีต้อนรับเข้าสู่ระบบบัญชีใหม่ครับ เริ่มต้นบันทึกรายวันกันเลย! 🧸✨', 'success');
+      // 1. Recover/sync user profile data (theme, categories, budgets, savings goals)
+      if (finalProfile) {
+        if (finalProfile.themeId) {
+          setSelectedThemeId(finalProfile.themeId as ThemeType);
+          localStorage.setItem('kuma_theme', finalProfile.themeId);
         }
+        if (finalProfile.incomeCategories && finalProfile.expenseCategories) {
+          setIncomeCategories(finalProfile.incomeCategories);
+          setExpenseCategories(finalProfile.expenseCategories);
+          localStorage.setItem('kuma_income_categories', JSON.stringify(finalProfile.incomeCategories));
+          localStorage.setItem('kuma_expense_categories', JSON.stringify(finalProfile.expenseCategories));
+        }
+        if (finalProfile.monthlyBudgets) {
+          setMonthlyBudgets(finalProfile.monthlyBudgets);
+          localStorage.setItem('kuma_monthly_budgets', JSON.stringify(finalProfile.monthlyBudgets));
+        }
+        if (finalProfile.savingsGoals) {
+          setSavingsGoals(finalProfile.savingsGoals);
+          localStorage.setItem('kuma_savings_goals', JSON.stringify(finalProfile.savingsGoals));
+        }
+      } else {
+        // Back up current profile state to cloud if new cloud profile doc
+        await uploadUserProfileToCloud(userSyncKey, {
+          themeId: selectedThemeId,
+          incomeCategories,
+          expenseCategories,
+          monthlyBudgets,
+          savingsGoals
+        });
       }
 
-      // 3. Recover/sync categories
-      if (finalCats !== null) {
-        setIncomeCategories(finalCats.incomeCategories);
-        setExpenseCategories(finalCats.expenseCategories);
-        localStorage.setItem('kuma_income_categories', JSON.stringify(finalCats.incomeCategories));
-        localStorage.setItem('kuma_expense_categories', JSON.stringify(finalCats.expenseCategories));
+      // 2. Recover/sync transactions (Cloud data is authoritative source of truth)
+      if (finalTx !== null) {
+        setTransactions(finalTx);
+        localStorage.setItem('kuma_transactions', JSON.stringify(finalTx));
+        if (finalTx.length > 0) {
+          addToast('ดึงข้อมูลบัญชีและซิงค์ข้อมูลเสร็จเรียบร้อยแล้วค้าบ! ✨🧸', 'success');
+        } else {
+          addToast('เชื่อมต่อบัญชีสำเร็จ (พบบัญชีว่างเปล่าในคลาวด์) พร้อมจดบันทึกแล้วครับ! 🧸✨', 'success');
+        }
       } else {
-        // Back up current categories to this user's cloud profile
-        await uploadCategoriesToCloud(userSyncKey, incomeCategories, expenseCategories);
+        // Brand new cloud sync key initialization
+        const localTx = transactions || [];
+        setTransactions(localTx);
+        localStorage.setItem('kuma_transactions', JSON.stringify(localTx));
+        await uploadTransactionsToCloud(userSyncKey, localTx);
+        addToast('ซิงค์และเปิดใช้งานบัญชีใหม่บนคลาวด์เรียบร้อยแล้วครับ! 🧸☁️', 'success');
       }
     } catch (error) {
       console.error("Error during login sync:", error);
@@ -550,10 +760,15 @@ export default function App() {
   };
 
   const handleSignupSuccess = async (username: string, userSyncKey: string) => {
-    // Initialize cloud profile on their new syncKey with clean transactions
-    // and customized/default categories to ensure it's ready when they log in!
+    // Initialize cloud profile on their new syncKey with clean transactions and default settings
     await uploadTransactionsToCloud(userSyncKey, []);
-    await uploadCategoriesToCloud(userSyncKey, incomeCategories, expenseCategories);
+    await uploadUserProfileToCloud(userSyncKey, {
+      themeId: selectedThemeId,
+      incomeCategories,
+      expenseCategories,
+      monthlyBudgets,
+      savingsGoals
+    });
     
     // Show success popup and redirect to login page
     showConfirm(
@@ -596,11 +811,16 @@ export default function App() {
         setTransactions(INITIAL_TRANSACTIONS);
         localStorage.setItem('kuma_transactions', JSON.stringify(INITIAL_TRANSACTIONS));
 
-        // Reset categories
+        // Reset categories, budgets, and savings goals
         setIncomeCategories(INCOME_CATEGORIES);
         setExpenseCategories(EXPENSE_CATEGORIES);
+        setMonthlyBudgets({});
+        setSavingsGoals([]);
+
         localStorage.setItem('kuma_income_categories', JSON.stringify(INCOME_CATEGORIES));
         localStorage.setItem('kuma_expense_categories', JSON.stringify(EXPENSE_CATEGORIES));
+        localStorage.setItem('kuma_monthly_budgets', JSON.stringify({}));
+        localStorage.setItem('kuma_savings_goals', JSON.stringify([]));
         
         addToast('ออกจากระบบและล้างข้อมูลส่วนตัวในเครื่องเรียบร้อยแล้วน้า บ๊ายบายครับ! 👋🧸', 'success');
       },
@@ -760,13 +980,19 @@ export default function App() {
     setIsSyncing(true);
     addToast('กำลังอัปเดตข้อมูลขึ้นระบบคลาวด์ปลอดภัย... ☁️', 'sync');
     const successTx = await uploadTransactionsToCloud(syncKey, transactions);
-    const successCat = await uploadCategoriesToCloud(syncKey, incomeCategories, expenseCategories);
+    const successProfile = await uploadUserProfileToCloud(syncKey, {
+      themeId: selectedThemeId,
+      incomeCategories,
+      expenseCategories,
+      monthlyBudgets,
+      savingsGoals
+    });
     setIsSyncing(false);
-    if (successTx && successCat) {
+    if (successTx && successProfile) {
       const now = Date.now();
       setLastSyncedAt(now);
       localStorage.setItem('kuma_last_synced', now.toString());
-      addToast('☁️ สำรองข้อมูลขึ้นคลาวด์สำเร็จ! ยอดบัญชีและหมวดหมู่ปลอดภัยหายห่วง 💯', 'success');
+      addToast('☁️ สำรองข้อมูลขึ้นคลาวด์สำเร็จ! ยอดบัญชี, งบประมาณ และเป้าหมายปลอดภัยหายห่วง 💯', 'success');
     } else {
       addToast('❌ การซิงค์ล้มเหลว กรุณาตรวจสอบอินเทอร์เน็ต', 'error');
     }
@@ -796,23 +1022,37 @@ export default function App() {
         new Promise<any[] | null>((resolve) => setTimeout(() => resolve(null), timeoutMs))
       ]);
 
-      const fetchedCats = await Promise.race([
-        downloadCategoriesFromCloud(targetKey),
+      const fetchedProfile = await Promise.race([
+        downloadUserProfileFromCloud(targetKey),
         new Promise<any>((resolve) => setTimeout(() => resolve(null), timeoutMs))
       ]);
       
       setIsSyncing(false);
 
       if (fetchedTx !== null) {
-        // Save
+        // Save transactions
         setTransactions(fetchedTx);
         localStorage.setItem('kuma_transactions', JSON.stringify(fetchedTx));
         
-        if (fetchedCats) {
-          setIncomeCategories(fetchedCats.incomeCategories);
-          setExpenseCategories(fetchedCats.expenseCategories);
-          localStorage.setItem('kuma_income_categories', JSON.stringify(fetchedCats.incomeCategories));
-          localStorage.setItem('kuma_expense_categories', JSON.stringify(fetchedCats.expenseCategories));
+        if (fetchedProfile) {
+          if (fetchedProfile.themeId) {
+            setSelectedThemeId(fetchedProfile.themeId as ThemeType);
+            localStorage.setItem('kuma_theme', fetchedProfile.themeId);
+          }
+          if (fetchedProfile.incomeCategories && fetchedProfile.expenseCategories) {
+            setIncomeCategories(fetchedProfile.incomeCategories);
+            setExpenseCategories(fetchedProfile.expenseCategories);
+            localStorage.setItem('kuma_income_categories', JSON.stringify(fetchedProfile.incomeCategories));
+            localStorage.setItem('kuma_expense_categories', JSON.stringify(fetchedProfile.expenseCategories));
+          }
+          if (fetchedProfile.monthlyBudgets) {
+            setMonthlyBudgets(fetchedProfile.monthlyBudgets);
+            localStorage.setItem('kuma_monthly_budgets', JSON.stringify(fetchedProfile.monthlyBudgets));
+          }
+          if (fetchedProfile.savingsGoals) {
+            setSavingsGoals(fetchedProfile.savingsGoals);
+            localStorage.setItem('kuma_savings_goals', JSON.stringify(fetchedProfile.savingsGoals));
+          }
         }
         
         // Update local keys
@@ -857,14 +1097,25 @@ export default function App() {
       () => {
         showConfirm(
           'ยืนยันอีกครั้งน้าค้าบ... 🧸🗑️',
-          'ลบทุกรายการแล้วเริ่มนับหนึ่งใหม่ใช่ไหมเอ่ย?',
+          'ลบทุกรายการและข้อมูลการเงินทั้งหมด แล้วเริ่มนับหนึ่งใหม่ใช่ไหมเอ่ย?',
           async () => {
+            // Reset state
             setTransactions([]);
+            setMonthlyBudgets({});
+            setSavingsGoals([]);
+            setIncomeCategories(INCOME_CATEGORIES);
+            setExpenseCategories(EXPENSE_CATEGORIES);
+
+            // Reset local storage
             localStorage.setItem('kuma_transactions', JSON.stringify([]));
-            
+            localStorage.setItem('kuma_monthly_budgets', JSON.stringify({}));
+            localStorage.setItem('kuma_savings_goals', JSON.stringify([]));
+            localStorage.setItem('kuma_income_categories', JSON.stringify(INCOME_CATEGORIES));
+            localStorage.setItem('kuma_expense_categories', JSON.stringify(EXPENSE_CATEGORIES));
+
             if (syncKey) {
               setIsSyncing(true);
-              const success = await uploadTransactionsToCloud(syncKey, []);
+              const success = await clearAllCloudData(syncKey, INCOME_CATEGORIES, EXPENSE_CATEGORIES);
               setIsSyncing(false);
               if (success) {
                 const now = Date.now();
@@ -2613,7 +2864,19 @@ export default function App() {
                               {catDetail.emoji}
                             </div>
                             <div className="space-y-0.5">
-                              <span className="text-[9px] font-bold text-slate-400 block uppercase tracking-wider">{catDetail.name}{t.subCategory ? ` • ${t.subCategory}` : ''}</span>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-[9px] font-bold text-slate-400 block uppercase tracking-wider">{catDetail.name}{t.subCategory ? ` • ${t.subCategory}` : ''}</span>
+                                {t.isRecurring && (
+                                  <span className="text-[8px] font-extrabold bg-rose-500/10 text-rose-500 dark:bg-rose-500/20 dark:text-rose-400 px-1.5 py-0.2 rounded-md flex items-center gap-0.5">
+                                    <Repeat size={8} /> ประจำเดือน
+                                  </span>
+                                )}
+                                {t.recurringParentId && (
+                                  <span className="text-[8px] font-extrabold bg-amber-500/10 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400 px-1.5 py-0.2 rounded-md flex items-center gap-0.5">
+                                    <Repeat size={8} /> ออโต้
+                                  </span>
+                                )}
+                              </div>
                               <p className="text-xs font-bold leading-none">{t.description}</p>
                               <span className="text-[9px] font-semibold text-slate-400 flex items-center gap-1">
                                 <Clock size={9} /> {t.date} | {t.time}

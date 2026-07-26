@@ -10,7 +10,8 @@ import {
   where, 
   writeBatch,
   orderBy,
-  deleteDoc
+  deleteDoc,
+  onSnapshot
 } from 'firebase/firestore';
 import {
   getAuth,
@@ -52,12 +53,118 @@ export async function verifySyncKey(syncKey: string): Promise<boolean> {
   }
 }
 
-// Upload transactions to Cloud under a specific Sync Key
-export async function uploadTransactionsToCloud(syncKey: string, transactions: any[]): Promise<boolean> {
+// Real-time listener for transactions
+export function subscribeToTransactions(
+  syncKey: string,
+  onData: (transactions: any[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  if (!syncKey) return () => {};
   try {
     const key = syncKey.toUpperCase();
+    const transCollectionRef = collection(db, 'sync_profiles', key, 'transactions');
+    const q = query(transCollectionRef, orderBy('createdAt', 'desc'));
+
+    return onSnapshot(q, (snapshot) => {
+      const transactions: any[] = [];
+      snapshot.forEach((docSnap) => {
+        transactions.push(docSnap.data());
+      });
+      onData(transactions);
+    }, (error) => {
+      console.error("Error listening to transactions:", error);
+      if (onError) onError(error);
+    });
+  } catch (err) {
+    console.error("Error setting up subscribeToTransactions:", err);
+    return () => {};
+  }
+}
+
+// Real-time listener for profile (theme, categories, budgets & goals)
+export function subscribeToProfile(
+  syncKey: string,
+  onData: (data: { 
+    incomeCategories?: any[]; 
+    expenseCategories?: any[]; 
+    themeId?: string;
+    monthlyBudgets?: Record<string, number>;
+    savingsGoals?: any[];
+  }) => void,
+  onError?: (err: any) => void
+): () => void {
+  if (!syncKey) return () => {};
+  try {
+    const key = syncKey.toUpperCase();
+    const profileRef = doc(db, 'sync_profiles', key);
+
+    return onSnapshot(profileRef, (snap) => {
+      if (snap.exists()) {
+        onData(snap.data() as any);
+      }
+    }, (error) => {
+      console.error("Error listening to profile:", error);
+      if (onError) onError(error);
+    });
+  } catch (err) {
+    console.error("Error setting up subscribeToProfile:", err);
+    return () => {};
+  }
+}
+
+// Save or update a single transaction in Cloud
+export async function saveTransactionToCloud(syncKey: string, tx: any): Promise<boolean> {
+  try {
+    if (!syncKey || !tx || !tx.id) return false;
+    const key = syncKey.toUpperCase();
+    const txRef = doc(db, 'sync_profiles', key, 'transactions', tx.id);
+    const sanitizedTx = JSON.parse(JSON.stringify(tx));
+    await setDoc(txRef, sanitizedTx);
+
+    // Update profile metadata
+    const profileRef = doc(db, 'sync_profiles', key);
+    await setDoc(profileRef, {
+      lastSyncedAt: Date.now()
+    }, { merge: true });
+
+    return true;
+  } catch (error) {
+    console.error("Error saving transaction to cloud:", error);
+    return false;
+  }
+}
+
+// Delete a single transaction from Cloud
+export async function deleteTransactionFromCloud(syncKey: string, txId: string): Promise<boolean> {
+  try {
+    if (!syncKey || !txId) return false;
+    const key = syncKey.toUpperCase();
+    const txRef = doc(db, 'sync_profiles', key, 'transactions', txId);
+    await deleteDoc(txRef);
+
+    // Update profile metadata
+    const transCollectionRef = collection(db, 'sync_profiles', key, 'transactions');
+    const snap = await getDocs(transCollectionRef);
+    const profileRef = doc(db, 'sync_profiles', key);
+    await setDoc(profileRef, {
+      lastSyncedAt: Date.now(),
+      transactionCount: snap.size
+    }, { merge: true });
+
+    return true;
+  } catch (error) {
+    console.error("Error deleting transaction from cloud:", error);
+    return false;
+  }
+}
+
+// Upload transactions to Cloud under a specific Sync Key in safe chunks
+export async function uploadTransactionsToCloud(syncKey: string, transactions: any[]): Promise<boolean> {
+  try {
+    if (!syncKey) return false;
+    const key = syncKey.toUpperCase();
     
-    // Write profile document
+    // Write profile document metadata
     const profileRef = doc(db, 'sync_profiles', key);
     await setDoc(profileRef, {
       syncKey: key,
@@ -65,37 +172,32 @@ export async function uploadTransactionsToCloud(syncKey: string, transactions: a
       transactionCount: transactions.length
     }, { merge: true });
 
-    // Write transactions in batches (max 500 per batch)
-    // First clear existing transactions on cloud to ensure absolute parity
     const transCollectionRef = collection(db, 'sync_profiles', key, 'transactions');
     const existingDocs = await getDocs(transCollectionRef);
     
-    // Delete existing
-    const deleteBatch = writeBatch(db);
-    existingDocs.docs.forEach((doc) => {
-      deleteBatch.delete(doc.ref);
-    });
-    await deleteBatch.commit();
-
-    // Upload new
-    if (transactions.length > 0) {
-      // Chunk transactions into batches of 400
-      const chunks = [];
-      for (let i = 0; i < transactions.length; i += 400) {
-        chunks.push(transactions.slice(i, i + 400));
-      }
-
-      for (const chunk of chunks) {
-        const batch = writeBatch(db);
-        chunk.forEach((tx) => {
-          const txRef = doc(db, 'sync_profiles', key, 'transactions', tx.id);
-          // Sanitize: remove undefined values by serializing/deserializing via JSON
-          const sanitizedTx = JSON.parse(JSON.stringify(tx));
-          batch.set(txRef, sanitizedTx);
-        });
-        await batch.commit();
-      }
+    const currentTxIds = new Set(transactions.map(t => t.id));
+    
+    // 1. Delete docs that are no longer present in transactions (in chunks of 400)
+    const docsToDelete = existingDocs.docs.filter(docSnap => !currentTxIds.has(docSnap.id));
+    for (let i = 0; i < docsToDelete.length; i += 400) {
+      const chunk = docsToDelete.slice(i, i + 400);
+      const batch = writeBatch(db);
+      chunk.forEach(docSnap => batch.delete(docSnap.ref));
+      await batch.commit();
     }
+
+    // 2. Set/Write current transactions (in chunks of 400)
+    for (let i = 0; i < transactions.length; i += 400) {
+      const chunk = transactions.slice(i, i + 400);
+      const batch = writeBatch(db);
+      chunk.forEach(tx => {
+        const txRef = doc(db, 'sync_profiles', key, 'transactions', tx.id);
+        const sanitizedTx = JSON.parse(JSON.stringify(tx));
+        batch.set(txRef, sanitizedTx);
+      });
+      await batch.commit();
+    }
+
     return true;
   } catch (error) {
     console.error("Error uploading transactions:", error);
@@ -145,6 +247,54 @@ export async function uploadThemeToCloud(syncKey: string, themeId: string): Prom
   }
 }
 
+// Upload full user profile data (theme, categories, budgets, goals) to Cloud
+export async function uploadUserProfileToCloud(
+  syncKey: string,
+  profileData: {
+    themeId?: string;
+    incomeCategories?: any[];
+    expenseCategories?: any[];
+    monthlyBudgets?: Record<string, number>;
+    savingsGoals?: any[];
+  }
+): Promise<boolean> {
+  try {
+    if (!syncKey) return false;
+    const key = syncKey.toUpperCase();
+    const profileRef = doc(db, 'sync_profiles', key);
+    const sanitized = JSON.parse(JSON.stringify(profileData));
+    sanitized.lastSyncedAt = Date.now();
+    await setDoc(profileRef, sanitized, { merge: true });
+    return true;
+  } catch (error) {
+    console.error("Error uploading profile data to cloud:", error);
+    return false;
+  }
+}
+
+// Download full user profile data from Cloud
+export async function downloadUserProfileFromCloud(syncKey: string): Promise<{
+  themeId?: string;
+  incomeCategories?: any[];
+  expenseCategories?: any[];
+  monthlyBudgets?: Record<string, number>;
+  savingsGoals?: any[];
+} | null> {
+  try {
+    if (!syncKey) return null;
+    const key = syncKey.toUpperCase();
+    const profileRef = doc(db, 'sync_profiles', key);
+    const snap = await getDoc(profileRef);
+    if (snap.exists()) {
+      return snap.data() as any;
+    }
+    return null;
+  } catch (error) {
+    console.error("Error downloading profile data from cloud:", error);
+    return null;
+  }
+}
+
 // Download selected theme from Cloud under a specific Sync Key
 export async function downloadThemeFromCloud(syncKey: string): Promise<string | null> {
   try {
@@ -183,6 +333,42 @@ export async function downloadCategoriesFromCloud(syncKey: string): Promise<{ in
   } catch (error) {
     console.error("Error downloading categories:", error);
     return null;
+  }
+}
+
+// Clear all cloud data (transactions & profile info) under a specific Sync Key
+export async function clearAllCloudData(syncKey: string, defaultIncomeCats: any[], defaultExpenseCats: any[]): Promise<boolean> {
+  try {
+    if (!syncKey) return false;
+    const key = syncKey.toUpperCase();
+
+    // 1. Reset profile doc
+    const profileRef = doc(db, 'sync_profiles', key);
+    await setDoc(profileRef, {
+      syncKey: key,
+      lastSyncedAt: Date.now(),
+      transactionCount: 0,
+      monthlyBudgets: {},
+      savingsGoals: [],
+      incomeCategories: JSON.parse(JSON.stringify(defaultIncomeCats)),
+      expenseCategories: JSON.parse(JSON.stringify(defaultExpenseCats))
+    });
+
+    // 2. Delete ALL transactions in subcollection in chunks of 400
+    const transCollectionRef = collection(db, 'sync_profiles', key, 'transactions');
+    const existingDocs = await getDocs(transCollectionRef);
+    
+    for (let i = 0; i < existingDocs.docs.length; i += 400) {
+      const chunk = existingDocs.docs.slice(i, i + 400);
+      const batch = writeBatch(db);
+      chunk.forEach(docSnap => batch.delete(docSnap.ref));
+      await batch.commit();
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Error clearing all cloud data:", error);
+    return false;
   }
 }
 

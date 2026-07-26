@@ -12,6 +12,9 @@ export interface Transaction {
   createdAt: number; // timestamp
   slipImage?: string; // Optional base64 or file URL for bank slip
   slipImages?: string[]; // Optional array of base64 or file URLs for multiple bank slips
+  isRecurring?: boolean; // Mark transaction as recurring monthly
+  recurringDay?: number; // Day of month for recurring (1-31)
+  recurringParentId?: string; // ID of the parent recurring transaction if generated automatically
 }
 
 export type ThemeType = 'cherry' | 'matcha' | 'blueberry' | 'peach' | 'cocoa' | 'natural';
