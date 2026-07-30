@@ -192,20 +192,27 @@ export default function App() {
   const [goalActionType, setGoalActionType] = useState<'deposit' | 'withdraw'>('deposit');
   const [goalActionAmount, setGoalActionAmount] = useState('');
 
+  // Track previous syncKey to avoid uploading old local state when switching user accounts
+  const prevSyncKeyRef = React.useRef(syncKey);
+
   // Trigger local storage save whenever budget or savings goal changes
   useEffect(() => {
     localStorage.setItem('kuma_monthly_budgets', JSON.stringify(monthlyBudgets));
-    if (syncKey) {
+    if (syncKey && prevSyncKeyRef.current === syncKey && !isInitialSync) {
       uploadUserProfileToCloud(syncKey, { monthlyBudgets });
     }
-  }, [monthlyBudgets, syncKey]);
+  }, [monthlyBudgets]);
 
   useEffect(() => {
     localStorage.setItem('kuma_savings_goals', JSON.stringify(savingsGoals));
-    if (syncKey) {
+    if (syncKey && prevSyncKeyRef.current === syncKey && !isInitialSync) {
       uploadUserProfileToCloud(syncKey, { savingsGoals });
     }
-  }, [savingsGoals, syncKey]);
+  }, [savingsGoals]);
+
+  useEffect(() => {
+    prevSyncKeyRef.current = syncKey;
+  }, [syncKey]);
 
 
   // PWA installation states
@@ -649,6 +656,9 @@ export default function App() {
   // --- Custom Authentication Handlers ---
   const handleLoginSuccess = async (username: string, userSyncKey: string) => {
     setIsInitialSync(true);
+    setIsSyncing(true);
+    addToast('กำลังดึงข้อมูลกระเป๋าเงินของคุณจากระบบคลาวด์... 🧸☁️', 'info');
+
     // Clear login inputs and increment auth key
     setAuthUsername('');
     setAuthPassword('');
@@ -656,18 +666,7 @@ export default function App() {
     setAuthKey(prev => prev + 1);
 
     try {
-      setLoggedInUser(username);
-      localStorage.setItem('kuma_logged_in_user', username);
-      
-      // Switch to the user's sync key
-      setSyncKey(userSyncKey);
-      localStorage.setItem('kuma_sync_key', userSyncKey);
-      
-      // Download cloud data for this key with a timeout
-      setIsSyncing(true);
-      addToast('กำลังดึงข้อมูลกระเป๋าเงินของคุณจากระบบคลาวด์... 🧸☁️', 'info');
-      
-      const timeoutMs = 5000; // 5s timeout
+      const timeoutMs = 8000; // 8s timeout for cloud handshake
       
       const txPromise = downloadTransactionsFromCloud(userSyncKey);
       const profilePromise = downloadUserProfileFromCloud(userSyncKey);
@@ -682,14 +681,16 @@ export default function App() {
         new Promise<string>((resolve) => setTimeout(() => resolve('TIMEOUT'), timeoutMs))
       ]);
       
-      setIsSyncing(false);
-
       const isTimeout = downloadedTx === 'TIMEOUT' || downloadedProfile === 'TIMEOUT';
 
       if (isTimeout) {
-        addToast('⚡ เชื่อมต่อระบบคลาวด์ล่าช้า คุมะคุงขอเข้าใช้งานแบบออฟไลน์ให้ก่อนนะครับ ไม่ต้องห่วง ข้อมูลปลอดภัยในระบบแน่นอนครับ! 🧸💼☁️', 'sync');
-        setIsInitialSync(false);
-        setIsSyncing(false);
+        // Even if timeout on fast handshake, set active user and syncKey so real-time listener takes over
+        setLoggedInUser(username);
+        localStorage.setItem('kuma_logged_in_user', username);
+        setSyncKey(userSyncKey);
+        localStorage.setItem('kuma_sync_key', userSyncKey);
+        
+        addToast('⚡ เชื่อมต่อระบบคลาวด์ล่าช้า คุมะคุงขอเข้าใช้งานให้อัตโนมัติ ข้อมูลจะถูกซิงค์ตามมาทันทีครับ! 🧸💼☁️', 'sync');
         return;
       }
 
@@ -702,7 +703,7 @@ export default function App() {
         savingsGoals?: any[];
       } | null;
 
-      // 1. Recover/sync user profile data (theme, categories, budgets, savings goals)
+      // 1. Recover/sync user profile data from cloud
       if (finalProfile) {
         if (finalProfile.themeId) {
           setSelectedThemeId(finalProfile.themeId as ThemeType);
@@ -723,7 +724,7 @@ export default function App() {
           localStorage.setItem('kuma_savings_goals', JSON.stringify(finalProfile.savingsGoals));
         }
       } else {
-        // Back up current profile state to cloud if new cloud profile doc
+        // Back up current profile state to cloud if brand new user profile doc
         await uploadUserProfileToCloud(userSyncKey, {
           themeId: selectedThemeId,
           incomeCategories,
@@ -737,22 +738,29 @@ export default function App() {
       if (finalTx !== null) {
         setTransactions(finalTx);
         localStorage.setItem('kuma_transactions', JSON.stringify(finalTx));
-        if (finalTx.length > 0) {
-          addToast('ดึงข้อมูลบัญชีและซิงค์ข้อมูลเสร็จเรียบร้อยแล้วค้าบ! ✨🧸', 'success');
-        } else {
-          addToast('เชื่อมต่อบัญชีสำเร็จ (พบบัญชีว่างเปล่าในคลาวด์) พร้อมจดบันทึกแล้วครับ! 🧸✨', 'success');
-        }
       } else {
-        // Brand new cloud sync key initialization
+        // Brand new user cloud sync key initialization
         const localTx = transactions || [];
         setTransactions(localTx);
         localStorage.setItem('kuma_transactions', JSON.stringify(localTx));
         await uploadTransactionsToCloud(userSyncKey, localTx);
-        addToast('ซิงค์และเปิดใช้งานบัญชีใหม่บนคลาวด์เรียบร้อยแล้วครับ! 🧸☁️', 'success');
+      }
+
+      // Switch to the user's sync key and logged in user AFTER state is populated from cloud
+      setLoggedInUser(username);
+      localStorage.setItem('kuma_logged_in_user', username);
+      
+      setSyncKey(userSyncKey);
+      localStorage.setItem('kuma_sync_key', userSyncKey);
+
+      if (finalTx && finalTx.length > 0) {
+        addToast('ดึงข้อมูลบัญชีและซิงค์ข้อมูลเสร็จเรียบร้อยแล้วค้าบ! ✨🧸', 'success');
+      } else {
+        addToast(`เข้าสู่ระบบสำเร็จ! ยินดีต้อนรับคุณ ${username} ครับ 🧸✨`, 'success');
       }
     } catch (error) {
       console.error("Error during login sync:", error);
-      addToast('เกิดข้อผิดพลาดในการเชื่อมต่อคลาวด์คุมะคุงขออภัยด้วยนะค้าบ 🥺💧', 'error');
+      addToast('เกิดข้อผิดพลาดในการเชื่อมต่อคลาวด์ คุมะคุงขออภัยด้วยนะค้าบ 🥺💧', 'error');
     } finally {
       setIsInitialSync(false);
       setIsSyncing(false);
@@ -760,8 +768,11 @@ export default function App() {
   };
 
   const handleSignupSuccess = async (username: string, userSyncKey: string) => {
-    // Initialize cloud profile on their new syncKey with clean transactions and default settings
-    await uploadTransactionsToCloud(userSyncKey, []);
+    setIsSyncing(true);
+    addToast('กำลังบันทึกข้อมูลและลงทะเบียนบัญชีใหม่ของคุณ... 🧸☁️', 'info');
+
+    // Upload current user state so guest transactions/data are saved to their new account
+    await uploadTransactionsToCloud(userSyncKey, transactions);
     await uploadUserProfileToCloud(userSyncKey, {
       themeId: selectedThemeId,
       incomeCategories,
@@ -769,18 +780,11 @@ export default function App() {
       monthlyBudgets,
       savingsGoals
     });
+
+    setIsSyncing(false);
     
-    // Show success popup and redirect to login page
-    showConfirm(
-      'สมัครสมาชิกสำเร็จ 🎉',
-      'สมัครสมาชิกเรียบร้อยแล้วครับ! กรุณาเข้าสู่ระบบด้วยชื่อผู้ใช้งานและรหัสผ่านที่คุณตั้งไว้ เพื่อเริ่มต้นใช้งานกระเป๋าเงิน CashSniper นะครับ 🧸💼',
-      () => {
-        setAuthPassword(''); // Clear password
-        setAuthTab('login'); // Redirect to login tab
-      },
-      'เข้าสู่ระบบ',
-      '' // Empty cancel text hides the cancel button!
-    );
+    // Auto login into their new account
+    await handleLoginSuccess(username, userSyncKey);
   };
 
   const handleLogout = () => {

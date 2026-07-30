@@ -63,12 +63,16 @@ export function subscribeToTransactions(
   try {
     const key = syncKey.toUpperCase();
     const transCollectionRef = collection(db, 'sync_profiles', key, 'transactions');
-    const q = query(transCollectionRef, orderBy('createdAt', 'desc'));
 
-    return onSnapshot(q, (snapshot) => {
+    return onSnapshot(transCollectionRef, (snapshot) => {
       const transactions: any[] = [];
       snapshot.forEach((docSnap) => {
         transactions.push(docSnap.data());
+      });
+      transactions.sort((a, b) => {
+        const timeA = a.createdAt || (a.date ? new Date(a.date).getTime() : 0);
+        const timeB = b.createdAt || (b.date ? new Date(b.date).getTime() : 0);
+        return timeB - timeA;
       });
       onData(transactions);
     }, (error) => {
@@ -375,23 +379,30 @@ export async function clearAllCloudData(syncKey: string, defaultIncomeCats: any[
 // Download transactions from Cloud under a specific Sync Key
 export async function downloadTransactionsFromCloud(syncKey: string): Promise<any[] | null> {
   try {
+    if (!syncKey) return null;
     const key = syncKey.toUpperCase();
+    
+    const transCollectionRef = collection(db, 'sync_profiles', key, 'transactions');
+    const querySnapshot = await getDocs(transCollectionRef);
+    
     const profileRef = doc(db, 'sync_profiles', key);
     const profileSnap = await getDoc(profileRef);
-    
-    if (!profileSnap.exists()) {
+
+    if (querySnapshot.empty && !profileSnap.exists()) {
       return null;
     }
 
-    const transCollectionRef = collection(db, 'sync_profiles', key, 'transactions');
-    const q = query(transCollectionRef, orderBy('createdAt', 'desc'));
-    const querySnapshot = await getDocs(q);
-    
     const transactions: any[] = [];
     querySnapshot.forEach((doc) => {
       transactions.push(doc.data());
     });
     
+    transactions.sort((a, b) => {
+      const timeA = a.createdAt || (a.date ? new Date(a.date).getTime() : 0);
+      const timeB = b.createdAt || (b.date ? new Date(b.date).getTime() : 0);
+      return timeB - timeA;
+    });
+
     return transactions;
   } catch (error) {
     console.error("Error downloading transactions:", error);
