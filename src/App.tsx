@@ -170,10 +170,7 @@ export default function App() {
 
   const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>(() => {
     const stored = localStorage.getItem('kuma_savings_goals');
-    return stored ? JSON.parse(stored) : [
-      { id: '1', name: 'เที่ยวต่างจังหวัด 🚗', targetAmount: 5000, currentAmount: 1500, emoji: '🏕️', createdAt: Date.now() - 1000000 },
-      { id: '2', name: 'ซื้อแท็บเล็ตใหม่ 📱', targetAmount: 15000, currentAmount: 8000, emoji: '💻', createdAt: Date.now() }
-    ];
+    return stored ? JSON.parse(stored) : [];
   });
 
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
@@ -715,13 +712,16 @@ export default function App() {
           localStorage.setItem('kuma_income_categories', JSON.stringify(finalProfile.incomeCategories));
           localStorage.setItem('kuma_expense_categories', JSON.stringify(finalProfile.expenseCategories));
         }
-        if (finalProfile.monthlyBudgets) {
+        if (finalProfile.monthlyBudgets !== undefined) {
           setMonthlyBudgets(finalProfile.monthlyBudgets);
           localStorage.setItem('kuma_monthly_budgets', JSON.stringify(finalProfile.monthlyBudgets));
         }
-        if (finalProfile.savingsGoals) {
+        if (finalProfile.savingsGoals !== undefined) {
           setSavingsGoals(finalProfile.savingsGoals);
           localStorage.setItem('kuma_savings_goals', JSON.stringify(finalProfile.savingsGoals));
+        } else {
+          setSavingsGoals([]);
+          localStorage.setItem('kuma_savings_goals', '[]');
         }
       } else {
         // Back up current profile state to cloud if brand new user profile doc
@@ -1049,13 +1049,16 @@ export default function App() {
             localStorage.setItem('kuma_income_categories', JSON.stringify(fetchedProfile.incomeCategories));
             localStorage.setItem('kuma_expense_categories', JSON.stringify(fetchedProfile.expenseCategories));
           }
-          if (fetchedProfile.monthlyBudgets) {
+          if (fetchedProfile.monthlyBudgets !== undefined) {
             setMonthlyBudgets(fetchedProfile.monthlyBudgets);
             localStorage.setItem('kuma_monthly_budgets', JSON.stringify(fetchedProfile.monthlyBudgets));
           }
-          if (fetchedProfile.savingsGoals) {
+          if (fetchedProfile.savingsGoals !== undefined) {
             setSavingsGoals(fetchedProfile.savingsGoals);
             localStorage.setItem('kuma_savings_goals', JSON.stringify(fetchedProfile.savingsGoals));
+          } else {
+            setSavingsGoals([]);
+            localStorage.setItem('kuma_savings_goals', '[]');
           }
         }
         
