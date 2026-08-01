@@ -918,7 +918,11 @@ export default function App() {
     }
 
     setTransactions(updated);
-    localStorage.setItem('kuma_transactions', JSON.stringify(updated));
+    try {
+      localStorage.setItem('kuma_transactions', JSON.stringify(updated));
+    } catch (err) {
+      console.warn("localStorage quota exceeded, skipping local storage cache:", err);
+    }
     setDefaultAddDate(undefined);
     setActiveTab('dashboard');
 

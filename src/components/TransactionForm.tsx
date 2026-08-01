@@ -51,167 +51,7 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
   const [time, setTime] = useState<string>(getLocalTimeString());
   const [slipImages, setSlipImages] = useState<string[]>([]);
   const [subCategory, setSubCategory] = useState<string>('');
-  const [isScanning, setIsScanning] = useState<boolean>(false);
   const [isRecurring, setIsRecurring] = useState<boolean>(false);
-
-  // State to hold the OCR result preview before applying
-  const [ocrPreview, setOcrPreview] = useState<{
-    amount: string;
-    date: string;
-    time: string;
-    description: string;
-    type: TransactionType;
-    category: string;
-    subCategory: string;
-    bank?: string;
-    slipImage: string;
-  } | null>(null);
-
-  const handlePreviewChange = (key: string, value: any) => {
-    setOcrPreview(prev => {
-      if (!prev) return null;
-      const updated = { ...prev, [key]: value };
-      
-      // Reset subcategory if type or category changes
-      if (key === 'type') {
-        const newCats = value === 'income' ? incomeCategories : expenseCategories;
-        updated.category = newCats.length > 0 ? newCats[0].id : '';
-        updated.subCategory = '';
-      }
-      if (key === 'category') {
-        updated.subCategory = '';
-      }
-      
-      return updated;
-    });
-  };
-
-  const handleApplyPreview = () => {
-    if (!ocrPreview) return;
-    setType(ocrPreview.type);
-    setAmount(ocrPreview.amount);
-    setDate(ocrPreview.date);
-    setTime(ocrPreview.time);
-    setDescription(ocrPreview.description);
-    setCategory(ocrPreview.category);
-    setSubCategory(ocrPreview.subCategory);
-    setOcrPreview(null);
-    if (addToast) {
-      addToast('ดึงข้อมูลสลิปที่ยืนยันลงฟอร์มหลักสำเร็จแล้วน้า! 🧸💖', 'success');
-    }
-  };
-
-  const handleScanOCR = async (imageToScan?: string) => {
-    const targetImage = imageToScan || slipImages[slipImages.length - 1];
-    if (!targetImage) {
-      if (addToast) {
-        addToast('กรุณาอัปโหลดรูปภาพสลิปธนาคารก่อนสแกนนะค้าบ 🧾', 'error');
-      }
-      return;
-    }
-
-    setIsScanning(true);
-    if (addToast) {
-      addToast('คุมะคุงกำลังเพ่งเล็งวิเคราะห์ข้อมูลสลิปอยู่... 🔎🧸', 'info');
-    }
-
-    try {
-      const response = await fetch('/api/scan-slip', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ imageBase64: targetImage }),
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || 'ระบบวิเคราะห์สลิปขัดข้องชั่วคราว');
-      }
-
-      const data = await response.json();
-
-      const ocrType = (data.type as TransactionType) || 'expense';
-      const ocrAmount = (data.amount || '').toString();
-      const ocrDate = data.date || getLocalDateString();
-      const ocrTime = data.time || getLocalTimeString();
-      const ocrDescription = data.description || '';
-
-      // Auto-categorize based on description text matching or keywords
-      let matchedCat = '';
-      const lowerDesc = ocrDescription.toLowerCase();
-      
-      const targetCats = ocrType === 'income' ? incomeCategories : expenseCategories;
-      
-      const foundByName = targetCats.find(c => 
-        lowerDesc.includes(c.name.toLowerCase()) || c.name.toLowerCase().includes(lowerDesc)
-      );
-      
-      if (foundByName) {
-        matchedCat = foundByName.id;
-      } else {
-        const rules = [
-          { keywords: ['กิน', 'อาหาร', 'ชาบู', 'ส้มตำ', 'ข้าว', 'หมูกระทะ', 'ก๋วยเตี๋ยว', 'น้ำ', 'กาแฟ', 'cafe', 'food', 'shabu', 'มื้อ', 'อร่อย'], catId: 'food' },
-          { keywords: ['รถ', 'เดินทาง', 'บีทีเอส', 'bts', 'mrt', 'แท็กซี่', 'taxi', 'น้ำมัน', 'เติมน้ำมัน', 'วิน', 'มอเตอร์ไซค์', 'ค่าตั๋ว'], catId: 'transport' },
-          { keywords: ['ช้อป', 'ซื้อของ', 'ห้าง', 'เสื้อ', 'กางเกง', 'shopee', 'lazada', 'mall', 'shopping', 'โอนเงินชำระค่าสินค้า', 'ร้านค้า'], catId: 'shopping' },
-          { keywords: ['เน็ต', 'โทรศัพท์', 'ค่าไฟ', 'ค่าน้ำ', 'บิล', 'ไฟ', 'น้ำ', 'ค่าบ้าน', 'เช่า', 'netflix', 'spotify', 'bill', 'ส่วนกลาง'], catId: 'bills' },
-          { keywords: ['เที่ยว', 'หนัง', 'ตั๋ว', 'สังสรรค์', 'เหล้า', 'เบียร์', 'คาราโอเกะ', 'entertainment', 'คารา'], catId: 'entertainment' },
-          { keywords: ['หมอ', 'ยา', 'คลินิก', 'โรงพยาบาล', 'ฟัน', 'แว่น', 'health', 'medical', 'เภสัช'], catId: 'health' },
-          { keywords: ['เรียน', 'หนังสือ', 'คอร์ส', 'สอบ', 'education', 'book', 'ค่าเทอม'], catId: 'education' },
-          { keywords: ['เงินเดือน', 'salary', 'รายได้', 'จ้าง', 'ฟรีแลนซ์', 'freelance'], catId: 'salary' },
-          { keywords: ['ลงทุน', 'ปันผล', 'ดอกเบี้ย', 'interest', 'invest'], catId: 'investment' },
-        ];
-        
-        for (const rule of rules) {
-          if (rule.keywords.some(k => lowerDesc.includes(k))) {
-            const exists = targetCats.some(c => c.id === rule.catId);
-            if (exists) {
-              matchedCat = rule.catId;
-              break;
-            }
-          }
-        }
-      }
-
-      let matchedSub = '';
-      if (matchedCat) {
-        const matchedCatObj = targetCats.find(c => c.id === matchedCat);
-        if (matchedCatObj && matchedCatObj.subCategories) {
-          const foundSub = matchedCatObj.subCategories.find(sub => 
-            lowerDesc.includes(sub.toLowerCase())
-          );
-          if (foundSub) {
-            matchedSub = foundSub;
-          }
-        }
-      } else if (targetCats.length > 0) {
-        matchedCat = targetCats[0].id;
-      }
-
-      setOcrPreview({
-        amount: ocrAmount,
-        date: ocrDate,
-        time: ocrTime,
-        description: ocrDescription,
-        type: ocrType,
-        category: matchedCat,
-        subCategory: matchedSub,
-        bank: data.bank || 'ธนาคารทั่วไป / พร้อมเพย์',
-        slipImage: targetImage
-      });
-
-      if (addToast) {
-        addToast('คุมะคุงสแกนสลิปสำเร็จ! ตรวจสอบความถูกต้องก่อนบันทึกเลยนะค้าบ 🧸🔎', 'success');
-      }
-    } catch (err: any) {
-      console.error(err);
-      if (addToast) {
-        addToast(err.message || 'วิเคราะห์สลิปล้มเหลว ลองเปลี่ยนรูปดูอีกทีนะค้าบ 🥺', 'error');
-      }
-    } finally {
-      setIsScanning(false);
-    }
-  };
 
   const categories = type === 'income' ? incomeCategories : expenseCategories;
 
@@ -266,36 +106,77 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
     }
   }, [category, editingTransaction]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Helper to compress and resize image before saving/sending
+  const compressAndResizeImage = (file: File, maxWidth = 1000, maxHeight = 1000, quality = 0.7): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+
+          if (width > maxWidth || height > maxHeight) {
+            if (width > height) {
+              height = Math.round((height * maxWidth) / width);
+              width = maxWidth;
+            } else {
+              width = Math.round((width * maxHeight) / height);
+              height = maxHeight;
+            }
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(e.target?.result as string || '');
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
+          resolve(compressedBase64);
+        };
+        img.onerror = () => {
+          resolve(e.target?.result as string || '');
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = () => {
+        resolve('');
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      let oversizedCount = 0;
-      
-      Array.from(files).forEach((file: File) => {
-        if (file.size > 2 * 1024 * 1024) {
-          oversizedCount++;
-          return;
-        }
-        
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const resultStr = reader.result as string;
-          setSlipImages((prev) => [...prev, resultStr]);
-        };
-        reader.readAsDataURL(file);
-      });
-      
-      if (oversizedCount > 0) {
-        if (addToast) {
-          addToast(`มีรูปภาพ ${oversizedCount} รูป ขนาดเกิน 2MB (ข้ามรูปเหล่านี้นะค้าบ) 🥺`, 'error');
-        } else {
-          alert(`มีบางรูปภาพขนาดเกิน 2MB`);
-        }
-      } else {
-        if (addToast) {
-          addToast('แนบรูปภาพสลิปเรียบร้อยแล้วครับ! 🧾📸', 'success');
+      if (addToast) {
+        addToast('กำลังประมวลผลย่อขนาดรูปภาพสลิป... 🧾✨', 'info');
+      }
+
+      const newCompressedImages: string[] = [];
+      const fileList = Array.from(files) as File[];
+      for (const file of fileList) {
+        try {
+          const compressed = await compressAndResizeImage(file, 1000, 1000, 0.7);
+          if (compressed) {
+            newCompressedImages.push(compressed);
+          }
+        } catch (err) {
+          console.error("Compression error:", err);
         }
       }
+
+      if (newCompressedImages.length > 0) {
+        setSlipImages((prev) => [...prev, ...newCompressedImages]);
+        if (addToast) {
+          addToast(`แนบรูปภาพสลิป ${newCompressedImages.length} รูปเรียบร้อยแล้วครับ! 🧾📸`, 'success');
+        }
+      }
+      e.target.value = '';
     }
   };
 
@@ -733,44 +614,8 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
                 </div>
               ))}
             </div>
-
-            {/* Kuma OCR Trigger Button & Status */}
-            <div className="mt-3 pt-2 border-t border-slate-200/40 dark:border-slate-800/50">
-              <button
-                type="button"
-                disabled={isScanning}
-                onClick={() => handleScanOCR()}
-                className={`w-full py-2.5 px-3 rounded-xl text-xs font-extrabold transition-all active:scale-95 flex items-center justify-center gap-2 ${
-                  isScanning
-                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 cursor-not-allowed animate-pulse'
-                    : 'bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-slate-950 font-black shadow-sm'
-                }`}
-              >
-                {isScanning ? (
-                  <>
-                    <span className="animate-spin text-base">🧸</span>
-                    <span>คุมะคุงกำลังวิเคราะห์สลิปแบบเรียลไทม์... 🔎</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles size={14} className="animate-pulse text-slate-950" />
-                    <span>สแกนสลิปล่าสุดและกรอกอัตโนมัติ (Kuma OCR) 🧸🧾</span>
-                  </>
-                )}
-              </button>
-              <p className="text-[9px] text-center text-slate-400 dark:text-slate-500 mt-1.5 leading-relaxed">
-                💡 คุมะคุงสแกนเนอร์จะช่วยดึงยอดเงิน วันที่ เวลา และวิเคราะห์รายละเอียดรายการให้อัตโนมัติทันทีน้า!
-              </p>
-            </div>
           </div>
-        ) : (
-          <div className="mt-2 p-2.5 rounded-xl bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/10 dark:border-amber-500/20 text-[10px] text-slate-500 dark:text-slate-400 flex gap-2 items-center">
-            <span className="text-lg select-none">🧸💡</span>
-            <p className="font-semibold leading-relaxed">
-              สแกนสลิปอัจฉริยะ: เพียงอัปโหลดรูปสลิป แล้วกดสแกน คุมะคุงจะช่วยดึงยอดเงิน วันที่ เวลา และวิเคราะห์หมวดหมู่รายการให้อัตโนมัติทันทีค้าบ!
-            </p>
-          </div>
-        )}
+        ) : null}
       </div>
 
       {/* Buttons */}
@@ -804,261 +649,6 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
         </button>
       </div>
     </form>
-
-    {/* Kuma OCR Scanner Preview Modal */}
-    {ocrPreview && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-fade-in">
-        <div 
-          className={`w-full max-w-lg rounded-3xl border p-5 relative shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto transition-all ${
-            isDark ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-100 text-slate-800 shadow-2xl'
-          }`}
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800/85">
-            <div className="flex items-center gap-2">
-              <span className="text-2xl select-none">🧸🧾</span>
-              <div>
-                <h3 className="text-xs font-black tracking-tight flex items-center gap-1">
-                  <span>ตรวจสอบข้อมูลสลิปโดยคุมะคุง</span>
-                  <span className="text-[9px] bg-amber-500/15 text-amber-500 dark:text-amber-400 font-extrabold px-1.5 py-0.5 rounded-md animate-pulse">Kuma OCR</span>
-                </h3>
-                <p className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold mt-0.5">
-                  กรุณาตรวจสอบและยืนยันข้อมูลจากรูปภาพสลิปนะค้าบ
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setOcrPreview(null)}
-              className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-500 transition-all"
-            >
-              <X size={16} />
-            </button>
-          </div>
-
-          {/* Content Body */}
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 py-4 overflow-y-auto">
-            
-            {/* Left Column: Slip Image Preview */}
-            <div className="md:col-span-2 flex flex-col gap-1.5 justify-center items-center">
-              <div className="w-full flex items-center justify-between px-0.5">
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1">
-                  <ImageIcon size={10} /> รูปสลิปต้นฉบับ
-                </span>
-                {ocrPreview.bank && (
-                  <span className="text-[9px] font-black bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded-md flex items-center gap-1">
-                    🏦 {ocrPreview.bank}
-                  </span>
-                )}
-              </div>
-              <div className="w-full aspect-[3/4] rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-1 flex items-center justify-center relative">
-                <img
-                  src={ocrPreview.slipImage}
-                  alt="Original slip scanned"
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover rounded-xl"
-                />
-              </div>
-              <p className="text-[9px] text-slate-400 dark:text-slate-500 text-center italic mt-0.5 leading-relaxed">
-                (เทียบสลิปจริงกับแบบฟอร์มด้านข้างได้เลยนะค้าบ)
-              </p>
-            </div>
-
-            {/* Right Column: Editable Fields */}
-            <div className="md:col-span-3 space-y-3">
-              {/* Type Selection (Income / Expense) */}
-              <div>
-                <label className="block text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1 px-0.5">
-                  ประเภทรายการ
-                </label>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => handlePreviewChange('type', 'expense')}
-                    className={`py-1.5 rounded-xl text-xs font-extrabold border transition-all ${
-                      ocrPreview.type === 'expense'
-                        ? 'bg-rose-500/10 border-rose-500 text-rose-500 dark:text-rose-400'
-                        : 'bg-transparent border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 hover:text-slate-500'
-                    }`}
-                  >
-                    รายจ่าย 💸
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handlePreviewChange('type', 'income')}
-                    className={`py-1.5 rounded-xl text-xs font-extrabold border transition-all ${
-                      ocrPreview.type === 'income'
-                        ? 'bg-emerald-500/10 border-emerald-500 text-emerald-500 dark:text-emerald-400'
-                        : 'bg-transparent border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500 hover:text-slate-500'
-                    }`}
-                  >
-                    รายรับ 💰
-                  </button>
-                </div>
-              </div>
-
-              {/* Amount Input */}
-              <div>
-                <label className="block text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1 px-0.5 flex items-center justify-between">
-                  <span>ยอดเงิน (บาท)</span>
-                  <span className="text-emerald-500 dark:text-emerald-400 text-[9px] font-bold">สแกนสำเร็จ ⚡</span>
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 font-bold text-xs">
-                    ฿
-                  </div>
-                  <input
-                    type="number"
-                    step="any"
-                    required
-                    value={ocrPreview.amount}
-                    onChange={(e) => handlePreviewChange('amount', e.target.value)}
-                    placeholder="0.00"
-                    className={`block w-full pl-7 pr-3 py-2 rounded-xl text-sm font-bold border transition-colors focus:ring-1 focus:ring-amber-500 focus:border-amber-500 ${
-                      isDark 
-                        ? 'bg-slate-950 border-slate-800 text-slate-100 placeholder-slate-700' 
-                        : 'bg-slate-50 border-slate-200 text-slate-800 placeholder-slate-400'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Date and Time */}
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1 px-0.5">
-                    วันที่โอน
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={ocrPreview.date}
-                    onChange={(e) => handlePreviewChange('date', e.target.value)}
-                    className={`block w-full px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors focus:ring-1 focus:ring-amber-500 focus:border-amber-500 ${
-                      isDark 
-                        ? 'bg-slate-950 border-slate-800 text-slate-100' 
-                        : 'bg-slate-50 border-slate-200 text-slate-800'
-                    }`}
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1 px-0.5">
-                    เวลาโอน
-                  </label>
-                  <input
-                    type="time"
-                    required
-                    value={ocrPreview.time}
-                    onChange={(e) => handlePreviewChange('time', e.target.value)}
-                    className={`block w-full px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors focus:ring-1 focus:ring-amber-500 focus:border-amber-500 ${
-                      isDark 
-                        ? 'bg-slate-950 border-slate-800 text-slate-100' 
-                        : 'bg-slate-50 border-slate-200 text-slate-800'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Description Input */}
-              <div>
-                <label className="block text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1 px-0.5">
-                  รายละเอียด / บันทึกช่วยจำ
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={ocrPreview.description}
-                  onChange={(e) => handlePreviewChange('description', e.target.value)}
-                  placeholder="ระบุบันทึกช่วยจำ..."
-                  className={`block w-full px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors focus:ring-1 focus:ring-amber-500 focus:border-amber-500 ${
-                    isDark 
-                      ? 'bg-slate-950 border-slate-800 text-slate-100 placeholder-slate-700' 
-                      : 'bg-slate-50 border-slate-200 text-slate-800 placeholder-slate-400'
-                  }`}
-                />
-              </div>
-
-              {/* Category & Subcategory Selection */}
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1 px-0.5">
-                    หมวดหมู่หลัก
-                  </label>
-                  <select
-                    value={ocrPreview.category}
-                    onChange={(e) => handlePreviewChange('category', e.target.value)}
-                    className={`block w-full px-2 py-1.5 rounded-xl text-xs font-bold border transition-colors focus:ring-1 focus:ring-amber-500 focus:border-amber-500 ${
-                      isDark 
-                        ? 'bg-slate-950 border-slate-800 text-slate-100' 
-                        : 'bg-slate-50 border-slate-200 text-slate-800'
-                    }`}
-                  >
-                    {(ocrPreview.type === 'income' ? incomeCategories : expenseCategories).map((cat) => (
-                      <option key={cat.id} value={cat.id}>
-                        {cat.emoji} {cat.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1 px-0.5">
-                    หมวดหมู่ย่อย
-                  </label>
-                  <select
-                    value={ocrPreview.subCategory}
-                    onChange={(e) => handlePreviewChange('subCategory', e.target.value)}
-                    className={`block w-full px-2 py-1.5 rounded-xl text-xs font-bold border transition-colors focus:ring-1 focus:ring-amber-500 focus:border-amber-500 ${
-                      isDark 
-                        ? 'bg-slate-950 border-slate-800 text-slate-100' 
-                        : 'bg-slate-50 border-slate-200 text-slate-800'
-                    }`}
-                  >
-                    <option value="">ไม่มีหมวดหมู่ย่อย</option>
-                    {(() => {
-                      const cats = ocrPreview.type === 'income' ? incomeCategories : expenseCategories;
-                      const currentCatObj = cats.find(c => c.id === ocrPreview.category);
-                      if (currentCatObj && currentCatObj.subCategories) {
-                        return currentCatObj.subCategories.map((sub, idx) => (
-                          <option key={idx} value={sub}>
-                            {sub}
-                          </option>
-                        ));
-                      }
-                      return null;
-                    })()}
-                  </select>
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-          {/* Footer Buttons */}
-          <div className="flex gap-2 pt-3 border-t border-slate-100 dark:border-slate-800/85 mt-1">
-            <button
-              type="button"
-              onClick={() => setOcrPreview(null)}
-              className={`flex-1 py-2.5 rounded-xl text-xs font-extrabold transition-all border flex items-center justify-center gap-1 ${
-                isDark
-                  ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
-                  : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              ยกเลิก
-            </button>
-            <button
-              type="button"
-              onClick={handleApplyPreview}
-              className="flex-[2] py-2.5 rounded-xl text-xs font-black bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-slate-950 transition-all active:scale-98 flex items-center justify-center gap-1.5 shadow-md"
-            >
-              <Check size={14} className="stroke-[3]" />
-              ยืนยันและดึงข้อมูลลงฟอร์ม
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
     </>
   );
 };
