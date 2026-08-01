@@ -1,8 +1,21 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
 export default async function handler(req: any, res: any) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  );
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
   try {
@@ -11,12 +24,13 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: "กรุณาส่งรูปภาพสลิปที่ต้องการสแกนนะค้าบ" });
     }
 
-    if (!process.env.GEMINI_API_KEY) {
-      return res.status(500).json({ error: "กรุณาเปิดตั้งค่าหรือระบุ GEMINI_API_KEY ก่อนนะค้าบ" });
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: "กรุณาระบุ GEMINI_API_KEY ใน Vercel Environment Variables ก่อนนะค้าบ" });
     }
 
     const ai = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
+      apiKey: apiKey,
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build',
@@ -77,7 +91,7 @@ Return strictly valid JSON corresponding to the requested schema.`;
     const parsed = JSON.parse(textResult);
     return res.status(200).json(parsed);
   } catch (err: any) {
-    console.error("Gemini OCR Error:", err);
+    console.error("Vercel Gemini OCR Error:", err);
     return res.status(500).json({ error: err.message || "ไม่สามารถสแกนหรือวิเคราะห์สลิปได้น้า ลองอีกครั้งนะค้าบ" });
   }
 }
