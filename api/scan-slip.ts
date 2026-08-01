@@ -19,7 +19,15 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const { imageBase64 } = req.body || {};
+    let body = req.body;
+    if (typeof body === 'string') {
+      try {
+        body = JSON.parse(body);
+      } catch {
+        // use as is
+      }
+    }
+    const { imageBase64 } = body || {};
     if (!imageBase64) {
       return res.status(400).json({ error: "กรุณาส่งรูปภาพสลิปที่ต้องการสแกนนะค้าบ" });
     }
