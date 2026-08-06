@@ -26,13 +26,20 @@ export const BankAccountsOverview: React.FC<BankAccountsOverviewProps> = ({
   const getAccountMetrics = (accId: string, initialBal: number) => {
     let income = 0;
     let expense = 0;
+    const defaultAccId = accounts.find(a => a.isDefault)?.id || accounts[0]?.id;
 
     transactions.forEach((tx) => {
-      // If transaction has accountId matching this account, or if tx has no accountId and accId is default account
-      const isMatch = tx.accountId === accId || (!tx.accountId && accounts.find(a => a.isDefault)?.id === accId);
-      if (isMatch) {
-        if (tx.type === 'income') income += tx.amount;
-        if (tx.type === 'expense') expense += tx.amount;
+      const isSourceMatch = tx.accountId === accId || (!tx.accountId && defaultAccId === accId);
+      const isTargetMatch = tx.toAccountId === accId;
+
+      if (tx.type === 'income') {
+        if (isSourceMatch) income += tx.amount;
+      } else if (tx.type === 'expense') {
+        if (isSourceMatch) expense += tx.amount;
+        if (isTargetMatch) income += tx.amount;
+      } else if (tx.type === 'transfer') {
+        if (isSourceMatch) expense += tx.amount;
+        if (isTargetMatch) income += tx.amount;
       }
     });
 
@@ -43,6 +50,7 @@ export const BankAccountsOverview: React.FC<BankAccountsOverviewProps> = ({
     };
   };
 
+  // Portfolio-wide totals
   const totalIncomeAll = transactions.reduce((sum, tx) => tx.type === 'income' ? sum + tx.amount : sum, 0);
   const totalExpenseAll = transactions.reduce((sum, tx) => tx.type === 'expense' ? sum + tx.amount : sum, 0);
   const totalNetAll = totalInitialBalance + totalIncomeAll - totalExpenseAll;
@@ -148,7 +156,9 @@ export const BankAccountsOverview: React.FC<BankAccountsOverviewProps> = ({
                   </div>
                   <div className="truncate max-w-[120px]">
                     <span className="text-xs font-black block truncate">{acc.name}</span>
-                    <span className="text-[9px] text-slate-400 block truncate">{preset.shortName}</span>
+                    <span className="text-[9px] text-slate-400 block truncate">
+                      {preset.shortName}{acc.accountNumber ? ` • ${acc.accountNumber}` : ''}
+                    </span>
                   </div>
                 </div>
 

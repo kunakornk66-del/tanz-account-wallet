@@ -41,6 +41,16 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
   const [accountName, setAccountName] = useState<string>('');
   const [accountNumber, setAccountNumber] = useState<string>('');
   const [initialBalance, setInitialBalance] = useState<string>('0');
+  const [bankSearch, setBankSearch] = useState<string>('');
+
+  // States for editing account details
+  const [editingDetailsId, setEditingDetailsId] = useState<string | null>(null);
+  const [editDetailsName, setEditDetailsName] = useState<string>('');
+  const [editDetailsNumber, setEditDetailsNumber] = useState<string>('');
+  const [editDetailsBankKey, setEditDetailsBankKey] = useState<BankType>('kbank');
+
+  // State for delete confirmation modal
+  const [accountToDelete, setAccountToDelete] = useState<BankAccount | null>(null);
 
   if (!isOpen) return null;
 
@@ -152,6 +162,40 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
     }
   };
 
+  const handleStartEditDetails = (acc: BankAccount) => {
+    setEditingDetailsId(acc.id);
+    setEditDetailsName(acc.name);
+    setEditDetailsNumber(acc.accountNumber || '');
+    setEditDetailsBankKey(acc.bankKey);
+  };
+
+  const handleSaveAccountDetails = (id: string) => {
+    const preset = BANK_PRESETS.find(p => p.key === editDetailsBankKey);
+    const finalName = editDetailsName.trim() || preset?.shortName || 'บัญชีธนาคาร';
+    const finalNumber = editDetailsNumber.trim() || undefined;
+
+    if (onUpdateAccount) {
+      onUpdateAccount(id, {
+        name: finalName,
+        accountNumber: finalNumber,
+        bankKey: editDetailsBankKey
+      });
+    } else if (onSaveAccounts) {
+      const updated = accounts.map(a => a.id === id ? {
+        ...a,
+        name: finalName,
+        accountNumber: finalNumber,
+        bankKey: editDetailsBankKey
+      } : a);
+      onSaveAccounts(updated);
+    }
+
+    setEditingDetailsId(null);
+    if (addToast) {
+      addToast(`อัปเดตข้อมูลบัญชี "${finalName}" เรียบร้อยแล้วครับ! 🏦✨`, 'success');
+    }
+  };
+
   const handleSetDefault = (id: string) => {
     if (onSetDefaultAccount) {
       onSetDefaultAccount(id);
@@ -164,21 +208,27 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
     }
   };
 
-  const handleDelete = (id: string) => {
-    const target = accounts.find(a => a.id === id);
-    if (!target) return;
-    if (confirm(`คุณต้องการลบบัญชี "${target.name}" หรือไม่?`)) {
-      if (onDeleteAccount) {
-        onDeleteAccount(id);
-      } else if (onSaveAccounts) {
-        const updated = accounts.filter(a => a.id !== id);
-        if (updated.length > 0 && !updated.some(a => a.isDefault)) {
-          updated[0].isDefault = true;
-        }
-        onSaveAccounts(updated);
+  const handleStartDelete = (acc: BankAccount) => {
+    setAccountToDelete(acc);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!accountToDelete) return;
+    const id = accountToDelete.id;
+    const targetName = accountToDelete.name;
+
+    if (onDeleteAccount) {
+      onDeleteAccount(id);
+    } else if (onSaveAccounts) {
+      const updated = accounts.filter(a => a.id !== id);
+      if (updated.length > 0 && !updated.some(a => a.isDefault)) {
+        updated[0].isDefault = true;
       }
-      if (addToast) addToast('ลบบัญชีเรียบร้อยแล้วครับ 🗑️', 'info');
+      onSaveAccounts(updated);
     }
+
+    setAccountToDelete(null);
+    if (addToast) addToast(`ลบบัญชี "${targetName}" เรียบร้อยแล้วครับ 🗑️`, 'info');
   };
 
   return (
@@ -259,6 +309,7 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
               const preset = BANK_PRESETS.find(p => p.key === acc.bankKey) || BANK_PRESETS[BANK_PRESETS.length - 1];
               const currentNet = computeCurrentBalance(acc.id);
               const isEditing = editingInitialId === acc.id;
+              const isEditingDetails = editingDetailsId === acc.id;
 
               return (
                 <div
@@ -274,30 +325,44 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
                       {/* Bank Icon Badge */}
                       <div className={`w-11 h-11 rounded-2xl flex items-center justify-center text-xl font-black text-white shadow-sm shrink-0 bg-gradient-to-tr ${preset.bgGradient}`}>
                         {preset.logoEmoji}
                       </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-sm font-extrabold text-slate-800 dark:text-slate-100">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-sm font-extrabold text-slate-800 dark:text-slate-100 truncate">
                             {acc.name}
                           </h4>
                           {acc.isDefault && (
-                            <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-md bg-emerald-500 text-white flex items-center gap-1 shadow-xs">
+                            <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-md bg-emerald-500 text-white flex items-center gap-1 shadow-xs shrink-0">
                               <ShieldCheck size={10} /> บัญชีหลัก
                             </span>
                           )}
                         </div>
-                        <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+                        <p className="text-[11px] text-slate-400 font-medium mt-0.5 truncate">
                           {preset.name} {acc.accountNumber ? `• เลขบัญชี: ${acc.accountNumber}` : ''}
                         </p>
                       </div>
                     </div>
 
                     {/* Actions dropdown or buttons */}
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (isEditingDetails) {
+                            setEditingDetailsId(null);
+                          } else {
+                            handleStartEditDetails(acc);
+                          }
+                        }}
+                        className="px-2 py-1 text-[10px] font-bold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-emerald-500 hover:border-emerald-500 transition-colors flex items-center gap-1"
+                        title="แก้ไขชื่อ/เลขบัญชี/ธนาคาร"
+                      >
+                        <Edit2 size={10} /> {isEditingDetails ? 'ปิด' : 'แก้ไขข้อมูล'}
+                      </button>
                       {!acc.isDefault && (
                         <button
                           onClick={() => handleSetDefault(acc.id)}
@@ -307,17 +372,100 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
                           ตั้งหลัก
                         </button>
                       )}
-                      {accounts.length > 1 && (
-                        <button
-                          onClick={() => handleDelete(acc.id)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
-                          title="ลบบัญชี"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleStartDelete(acc)}
+                        disabled={accounts.length <= 1}
+                        className={`p-1.5 rounded-lg transition-colors ${
+                          accounts.length <= 1
+                            ? 'text-slate-300 dark:text-slate-700 cursor-not-allowed'
+                            : 'text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                        }`}
+                        title={accounts.length <= 1 ? 'ต้องมีอย่างน้อย 1 บัญชีในระบบ' : 'ลบบัญชี'}
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   </div>
+
+                  {/* Inline Details Edit Panel */}
+                  {isEditingDetails && (
+                    <div className={`mt-3 p-3.5 rounded-2xl border space-y-3 animate-fade-in ${
+                      isDark ? 'bg-slate-950/90 border-slate-700' : 'bg-slate-50 border-slate-200'
+                    }`}>
+                      <div className="text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1">
+                        <Edit2 size={12} className="text-emerald-500" /> แก้ไขชื่อ / ธนาคาร / เลขที่บัญชี
+                      </div>
+
+                      {/* Bank Preset Selector */}
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 mb-1">
+                          เลือกธนาคาร / ประเภท
+                        </label>
+                        <div className="max-h-32 overflow-y-auto grid grid-cols-3 sm:grid-cols-4 gap-1.5 p-1 rounded-xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
+                          {BANK_PRESETS.map((p) => (
+                            <button
+                              key={p.key}
+                              type="button"
+                              onClick={() => setEditDetailsBankKey(p.key)}
+                              className={`p-1.5 rounded-lg border text-[10px] font-bold flex items-center gap-1.5 transition-all ${
+                                editDetailsBankKey === p.key
+                                  ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500'
+                                  : 'border-transparent hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300'
+                              }`}
+                            >
+                              <span>{p.logoEmoji}</span>
+                              <span className="truncate">{p.shortName}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-400 mb-1">
+                            ชื่อบัญชี
+                          </label>
+                          <input
+                            type="text"
+                            value={editDetailsName}
+                            onChange={(e) => setEditDetailsName(e.target.value)}
+                            placeholder="ชื่อบัญชี"
+                            className="w-full px-2.5 py-1.5 text-xs font-bold rounded-lg border bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:border-emerald-500 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-400 mb-1">
+                            เลขที่บัญชี (ใส่หรือไม่ใส่ก็ได้)
+                          </label>
+                          <input
+                            type="text"
+                            value={editDetailsNumber}
+                            onChange={(e) => setEditDetailsNumber(e.target.value)}
+                            placeholder="xxx-x-xxxxx-x"
+                            className="w-full px-2.5 py-1.5 text-xs font-bold rounded-lg border bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:border-emerald-500 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setEditingDetailsId(null)}
+                          className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 dark:border-slate-700 text-slate-500"
+                        >
+                          ยกเลิก
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSaveAccountDetails(acc.id)}
+                          className="px-3 py-1.5 text-xs font-extrabold rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white shadow-xs active:scale-95"
+                        >
+                          บันทึกการแก้ไข
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Financial Metrics Row inside Card */}
                   <div className={`mt-3 pt-3 border-t grid grid-cols-2 gap-2 text-xs ${
@@ -475,29 +623,53 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
                 </button>
               </div>
 
-              {/* Bank Preset Selection Grid */}
+              {/* Bank Preset Selection Grid with Search */}
               <div>
-                <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1.5">
-                  เลือกประเภทธนาคาร / กระเป๋าเงิน
-                </label>
-                <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-                  {BANK_PRESETS.map((preset) => (
-                    <button
-                      key={preset.key}
-                      type="button"
-                      onClick={() => handleSelectBankPreset(preset.key)}
-                      className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all active:scale-95 ${
-                        bankKey === preset.key
-                          ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500'
-                          : isDark
-                            ? 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
-                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-                      }`}
-                    >
-                      <span className="text-xl mb-1">{preset.logoEmoji}</span>
-                      <span className="text-[9px] font-bold text-center truncate w-full">{preset.shortName}</span>
-                    </button>
-                  ))}
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                    เลือกประเภทธนาคาร / กระเป๋าเงิน ({BANK_PRESETS.length} รายการ)
+                  </label>
+                </div>
+                
+                <div className="mb-2">
+                  <input
+                    type="text"
+                    value={bankSearch}
+                    onChange={(e) => setBankSearch(e.target.value)}
+                    placeholder="🔍 พิมพ์ค้นหาธนาคาร (เช่น กสิกร, SCB, ธอส., TrueMoney...)"
+                    className={`w-full px-3 py-1.5 text-xs font-bold rounded-xl border focus:outline-none ${
+                      isDark 
+                        ? 'bg-slate-900 border-slate-700 text-white focus:border-emerald-500' 
+                        : 'bg-white border-slate-200 text-slate-800 focus:border-emerald-500'
+                    }`}
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 max-h-48 overflow-y-auto p-1 border rounded-xl bg-white/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
+                  {BANK_PRESETS
+                    .filter(preset => 
+                      !bankSearch.trim() || 
+                      preset.name.toLowerCase().includes(bankSearch.toLowerCase()) || 
+                      preset.shortName.toLowerCase().includes(bankSearch.toLowerCase()) ||
+                      preset.key.toLowerCase().includes(bankSearch.toLowerCase())
+                    )
+                    .map((preset) => (
+                      <button
+                        key={preset.key}
+                        type="button"
+                        onClick={() => handleSelectBankPreset(preset.key)}
+                        className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all active:scale-95 ${
+                          bankKey === preset.key
+                            ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500 text-emerald-600 dark:text-emerald-400 font-black'
+                            : isDark
+                              ? 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+                              : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        <span className="text-xl mb-1">{preset.logoEmoji}</span>
+                        <span className="text-[9px] font-bold text-center truncate w-full">{preset.shortName}</span>
+                      </button>
+                    ))}
                 </div>
               </div>
 
@@ -583,6 +755,41 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal Popup */}
+      {accountToDelete && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+          <div className={`w-full max-w-xs sm:max-w-sm rounded-3xl p-5 shadow-2xl border text-center transition-all ${
+            isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-100 text-slate-800'
+          }`}>
+            <div className="w-14 h-14 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center mx-auto mb-3 shadow-inner">
+              <Trash2 size={26} />
+            </div>
+            <h4 className="text-base font-extrabold mb-1">ยืนยันการลบบัญชี 🗑️</h4>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 leading-relaxed">
+              คุณต้องการลบบัญชี <span className="font-bold text-slate-800 dark:text-slate-200">"{accountToDelete.name}"</span> ออกจากระบบหรือไม่?
+            </p>
+            <div className="flex gap-2.5">
+              <button
+                type="button"
+                onClick={() => setAccountToDelete(null)}
+                className={`flex-1 py-2.5 rounded-xl text-xs font-bold border transition-colors ${
+                  isDark ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                className="flex-1 py-2.5 rounded-xl text-xs font-extrabold bg-rose-500 hover:bg-rose-600 text-white shadow-md active:scale-95 transition-all"
+              >
+                ยืนยันลบบัญชี
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

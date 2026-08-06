@@ -1,8 +1,35 @@
-export type TransactionType = 'income' | 'expense';
+export type TransactionType = 'income' | 'expense' | 'transfer';
 
 export type PaymentMethod = 'cash' | 'transfer' | 'promptpay' | 'credit' | 'other';
 
-export type BankType = 'cash' | 'kbank' | 'scb' | 'bbl' | 'ktb' | 'ttb' | 'gsb' | 'bay' | 'uob' | 'savings' | 'credit' | 'other';
+export type BankType = 
+  | 'cash' 
+  | 'kbank' 
+  | 'scb' 
+  | 'bbl' 
+  | 'ktb' 
+  | 'bay' 
+  | 'ttb' 
+  | 'gsb' 
+  | 'baac' 
+  | 'ghb' 
+  | 'uob' 
+  | 'cimb' 
+  | 'lhb' 
+  | 'kkp' 
+  | 'tisco' 
+  | 'icbc' 
+  | 'isbt' 
+  | 'sme' 
+  | 'exim' 
+  | 'citibank' 
+  | 'truemoney' 
+  | 'shopeepay' 
+  | 'rabbitlinepay' 
+  | 'paotang' 
+  | 'savings' 
+  | 'credit' 
+  | 'other';
 
 export interface BankAccount {
   id: string;
@@ -77,6 +104,16 @@ export const BANK_PRESETS: BankPreset[] = [
     borderColor: 'border-sky-500'
   },
   {
+    key: 'bay',
+    name: 'ธนาคารกรุงศรีอยุธยา (BAY)',
+    shortName: 'กรุงศรี',
+    logoEmoji: '💛',
+    bgGradient: 'from-amber-400 to-yellow-600',
+    badgeBg: 'bg-amber-500',
+    textColor: 'text-amber-500',
+    borderColor: 'border-amber-500'
+  },
+  {
     key: 'ttb',
     name: 'ธนาคารทหารไทยธนชาต (ttb)',
     shortName: 'ttb',
@@ -97,14 +134,24 @@ export const BANK_PRESETS: BankPreset[] = [
     borderColor: 'border-pink-500'
   },
   {
-    key: 'bay',
-    name: 'ธนาคารกรุงศรีอยุธยา (BAY)',
-    shortName: 'กรุงศรี',
-    logoEmoji: '💛',
-    bgGradient: 'from-amber-400 to-yellow-600',
-    badgeBg: 'bg-amber-500',
-    textColor: 'text-amber-500',
-    borderColor: 'border-amber-500'
+    key: 'baac',
+    name: 'ธนาคารเพื่อการเกษตรฯ (ธ.ก.ส.)',
+    shortName: 'ธ.ก.ส.',
+    logoEmoji: '🌾',
+    bgGradient: 'from-emerald-700 to-teal-800',
+    badgeBg: 'bg-emerald-700',
+    textColor: 'text-emerald-700',
+    borderColor: 'border-emerald-700'
+  },
+  {
+    key: 'ghb',
+    name: 'ธนาคารอาคารสงเคราะห์ (ธอส.)',
+    shortName: 'ธอส.',
+    logoEmoji: '🏠',
+    bgGradient: 'from-orange-500 to-amber-600',
+    badgeBg: 'bg-orange-500',
+    textColor: 'text-orange-500',
+    borderColor: 'border-orange-500'
   },
   {
     key: 'uob',
@@ -117,8 +164,138 @@ export const BANK_PRESETS: BankPreset[] = [
     borderColor: 'border-slate-600'
   },
   {
+    key: 'cimb',
+    name: 'ธนาคารซีไอเอ็มบี ไทย (CIMB)',
+    shortName: 'CIMB',
+    logoEmoji: '❤️',
+    bgGradient: 'from-red-600 to-rose-800',
+    badgeBg: 'bg-red-600',
+    textColor: 'text-red-600',
+    borderColor: 'border-red-600'
+  },
+  {
+    key: 'lhb',
+    name: 'ธนาคารแลนด์ แอนด์ เฮ้าส์ (LH Bank)',
+    shortName: 'LH Bank',
+    logoEmoji: '🪙',
+    bgGradient: 'from-teal-600 to-cyan-800',
+    badgeBg: 'bg-teal-600',
+    textColor: 'text-teal-600',
+    borderColor: 'border-teal-600'
+  },
+  {
+    key: 'kkp',
+    name: 'ธนาคารเกียรตินาคินภัทร (KKP / Dime!)',
+    shortName: 'KKP',
+    logoEmoji: '🏛️',
+    bgGradient: 'from-indigo-600 to-purple-800',
+    badgeBg: 'bg-indigo-600',
+    textColor: 'text-indigo-600',
+    borderColor: 'border-indigo-600'
+  },
+  {
+    key: 'tisco',
+    name: 'ธนาคารทิสโก้ (TISCO)',
+    shortName: 'TISCO',
+    logoEmoji: '🏢',
+    bgGradient: 'from-blue-600 to-indigo-800',
+    badgeBg: 'bg-blue-600',
+    textColor: 'text-blue-600',
+    borderColor: 'border-blue-600'
+  },
+  {
+    key: 'icbc',
+    name: 'ธนาคารไอซีบีซี (ไทย) (ICBC)',
+    shortName: 'ICBC',
+    logoEmoji: '🔴',
+    bgGradient: 'from-red-700 to-rose-900',
+    badgeBg: 'bg-red-700',
+    textColor: 'text-red-700',
+    borderColor: 'border-red-700'
+  },
+  {
+    key: 'isbt',
+    name: 'ธนาคารอิสลามแห่งประเทศไทย (iBank)',
+    shortName: 'iBank',
+    logoEmoji: '🌙',
+    bgGradient: 'from-emerald-800 to-teal-900',
+    badgeBg: 'bg-emerald-800',
+    textColor: 'text-emerald-800',
+    borderColor: 'border-emerald-800'
+  },
+  {
+    key: 'sme',
+    name: 'ธนาคาร SME D Bank',
+    shortName: 'SME Bank',
+    logoEmoji: '💼',
+    bgGradient: 'from-sky-600 to-blue-800',
+    badgeBg: 'bg-sky-600',
+    textColor: 'text-sky-600',
+    borderColor: 'border-sky-600'
+  },
+  {
+    key: 'exim',
+    name: 'ธนาคาร EXIM Bank',
+    shortName: 'EXIM',
+    logoEmoji: '🚢',
+    bgGradient: 'from-cyan-600 to-blue-800',
+    badgeBg: 'bg-cyan-600',
+    textColor: 'text-cyan-600',
+    borderColor: 'border-cyan-600'
+  },
+  {
+    key: 'citibank',
+    name: 'ซิตี้แบงก์ (Citibank)',
+    shortName: 'Citibank',
+    logoEmoji: '🏙️',
+    bgGradient: 'from-blue-500 to-indigo-700',
+    badgeBg: 'bg-blue-500',
+    textColor: 'text-blue-500',
+    borderColor: 'border-blue-500'
+  },
+  {
+    key: 'truemoney',
+    name: 'ทรูมันนี่ วอลเล็ท (TrueMoney)',
+    shortName: 'TrueMoney',
+    logoEmoji: '🧡',
+    bgGradient: 'from-orange-500 to-red-500',
+    badgeBg: 'bg-orange-500',
+    textColor: 'text-orange-500',
+    borderColor: 'border-orange-500'
+  },
+  {
+    key: 'shopeepay',
+    name: 'ช้อปปี้เพย์ (ShopeePay)',
+    shortName: 'ShopeePay',
+    logoEmoji: '🟠',
+    bgGradient: 'from-orange-600 to-amber-600',
+    badgeBg: 'bg-orange-600',
+    textColor: 'text-orange-600',
+    borderColor: 'border-orange-600'
+  },
+  {
+    key: 'rabbitlinepay',
+    name: 'แรบบิท ไลน์ เพย์ (LINE Pay)',
+    shortName: 'LINE Pay',
+    logoEmoji: '💚',
+    bgGradient: 'from-green-500 to-emerald-600',
+    badgeBg: 'bg-green-500',
+    textColor: 'text-green-500',
+    borderColor: 'border-green-500'
+  },
+  {
+    key: 'paotang',
+    name: 'เป๋าตัง (Paotang G-Wallet)',
+    shortName: 'เป๋าตัง',
+    logoEmoji: '🩵',
+    bgGradient: 'from-cyan-500 to-sky-600',
+    badgeBg: 'bg-cyan-500',
+    textColor: 'text-cyan-500',
+    borderColor: 'border-cyan-500'
+  },
+  {
     key: 'savings',
-    name: 'กระปุกออมเงิน / เงินออม',
+    name: 'กระปุกออมเงิน / สลากออมทรัพย์',
     shortName: 'เงินออม',
     logoEmoji: '🐷',
     bgGradient: 'from-pink-400 to-purple-500',
@@ -164,7 +341,8 @@ export interface Transaction {
   recurringDay?: number; // Day of month for recurring (1-31)
   recurringParentId?: string; // ID of the parent recurring transaction if generated automatically
   paymentMethod?: PaymentMethod; // เงินสด / โอนเงิน / พร้อมเพย์ / บัตรเครดิต
-  accountId?: string; // ID ของ BankAccount (เช่น 'acc_cash', 'acc_kbank')
+  accountId?: string; // ID ของ BankAccount ต้นทาง (เช่น 'acc_cash', 'acc_kbank')
+  toAccountId?: string; // ID ของ BankAccount ปลายทาง (กรณีโอนเงินระหว่างบัญชี)
 }
 
 export type ThemeType = 'cherry' | 'matcha' | 'blueberry' | 'peach' | 'cocoa' | 'natural';

@@ -114,7 +114,17 @@ export default function App() {
     return stored ? JSON.parse(stored) : EXPENSE_CATEGORIES;
   });
 
-  const getCategoryDetailsDynamic = (id: string, type: 'income' | 'expense') => {
+  const getCategoryDetailsDynamic = (id: string, type: 'income' | 'expense' | 'transfer') => {
+    if (type === 'transfer' || id === 'transfer') {
+      return {
+        id: 'transfer',
+        name: 'โอนเงินระหว่างบัญชี',
+        emoji: '🔄',
+        color: 'text-sky-500',
+        bgColor: 'bg-sky-100 dark:bg-sky-900/30',
+        subCategories: []
+      };
+    }
     const list = type === 'income' ? incomeCategories : expenseCategories;
     const found = list.find(c => c.id === id);
     if (found) return found;
@@ -749,28 +759,59 @@ export default function App() {
           setExpenseCategories(downloadedProfile.expenseCategories);
           localStorage.setItem('kuma_income_categories', JSON.stringify(downloadedProfile.incomeCategories));
           localStorage.setItem('kuma_expense_categories', JSON.stringify(downloadedProfile.expenseCategories));
+        } else {
+          setIncomeCategories(INCOME_CATEGORIES);
+          setExpenseCategories(EXPENSE_CATEGORIES);
+          localStorage.setItem('kuma_income_categories', JSON.stringify(INCOME_CATEGORIES));
+          localStorage.setItem('kuma_expense_categories', JSON.stringify(EXPENSE_CATEGORIES));
         }
         if (downloadedProfile.monthlyBudgets !== undefined) {
           setMonthlyBudgets(downloadedProfile.monthlyBudgets);
           localStorage.setItem('kuma_monthly_budgets', JSON.stringify(downloadedProfile.monthlyBudgets));
+        } else {
+          setMonthlyBudgets({});
+          localStorage.setItem('kuma_monthly_budgets', JSON.stringify({}));
         }
         if (downloadedProfile.savingsGoals !== undefined) {
           setSavingsGoals(downloadedProfile.savingsGoals);
           localStorage.setItem('kuma_savings_goals', JSON.stringify(downloadedProfile.savingsGoals));
+        } else {
+          setSavingsGoals([]);
+          localStorage.setItem('kuma_savings_goals', JSON.stringify([]));
         }
-        if (downloadedProfile.bankAccounts !== undefined && Array.isArray(downloadedProfile.bankAccounts)) {
+        if (downloadedProfile.bankAccounts !== undefined && Array.isArray(downloadedProfile.bankAccounts) && downloadedProfile.bankAccounts.length > 0) {
           setBankAccounts(downloadedProfile.bankAccounts);
           localStorage.setItem('kuma_bank_accounts', JSON.stringify(downloadedProfile.bankAccounts));
+        } else {
+          setBankAccounts(DEFAULT_BANK_ACCOUNTS);
+          localStorage.setItem('kuma_bank_accounts', JSON.stringify(DEFAULT_BANK_ACCOUNTS));
         }
+      } else {
+        // Brand new user profile: start fresh
+        setIncomeCategories(INCOME_CATEGORIES);
+        setExpenseCategories(EXPENSE_CATEGORIES);
+        setMonthlyBudgets({});
+        setSavingsGoals([]);
+        setBankAccounts(DEFAULT_BANK_ACCOUNTS);
+
+        localStorage.setItem('kuma_income_categories', JSON.stringify(INCOME_CATEGORIES));
+        localStorage.setItem('kuma_expense_categories', JSON.stringify(EXPENSE_CATEGORIES));
+        localStorage.setItem('kuma_monthly_budgets', JSON.stringify({}));
+        localStorage.setItem('kuma_savings_goals', JSON.stringify([]));
+        localStorage.setItem('kuma_bank_accounts', JSON.stringify(DEFAULT_BANK_ACCOUNTS));
       }
 
       // 2. Recover/sync transactions (Cloud data is authoritative source of truth)
       if (downloadedTx && downloadedTx.length > 0) {
         setTransactions(downloadedTx);
         localStorage.setItem('kuma_transactions', JSON.stringify(downloadedTx));
+      } else {
+        // Zero transactions for new/empty user (no sample/demo data)
+        setTransactions([]);
+        localStorage.setItem('kuma_transactions', JSON.stringify([]));
       }
 
-      addToast(`ยินดีต้อนรับกลับมาครับคุณ ${username}! ดึงข้อมูลกระเป๋าเงินจากคลาวด์เรียบร้อยแล้ว 🧸✨`, 'success');
+      addToast(`ยินดีต้อนรับกลับมาครับคุณ ${username}! เข้าสู่ระบบเรียบร้อยแล้ว 🧸✨`, 'success');
     } catch (error) {
       console.error("Error during login sync:", error);
       addToast(`ยินดีต้อนรับกลับมาครับคุณ ${username}! เข้าสู่ระบบเรียบร้อยแล้ว 🧸✨`, 'success');
@@ -782,17 +823,39 @@ export default function App() {
 
   const handleSignupSuccess = async (username: string, userSyncKey: string) => {
     setIsSyncing(true);
-    addToast('กำลังบันทึกข้อมูลและลงทะเบียนบัญชีใหม่ของคุณ... 🧸☁️', 'info');
+    addToast('กำลังสร้างและลงทะเบียนบัญชีใหม่ของคุณ... 🧸☁️', 'info');
 
-    // Upload current user state so guest transactions/data are saved to their new account
-    await uploadTransactionsToCloud(userSyncKey, transactions);
+    // Fresh start for new user signup (no guest transactions or sample data carried over)
+    const freshTransactions: Transaction[] = [];
+    const freshBudgets = {};
+    const freshSavingsGoals: SavingsGoal[] = [];
+    const freshBankAccounts = DEFAULT_BANK_ACCOUNTS;
+    const freshIncomeCategories = INCOME_CATEGORIES;
+    const freshExpenseCategories = EXPENSE_CATEGORIES;
+
+    setTransactions(freshTransactions);
+    setMonthlyBudgets(freshBudgets);
+    setSavingsGoals(freshSavingsGoals);
+    setBankAccounts(freshBankAccounts);
+    setIncomeCategories(freshIncomeCategories);
+    setExpenseCategories(freshExpenseCategories);
+
+    localStorage.setItem('kuma_transactions', JSON.stringify(freshTransactions));
+    localStorage.setItem('kuma_monthly_budgets', JSON.stringify(freshBudgets));
+    localStorage.setItem('kuma_savings_goals', JSON.stringify(freshSavingsGoals));
+    localStorage.setItem('kuma_bank_accounts', JSON.stringify(freshBankAccounts));
+    localStorage.setItem('kuma_income_categories', JSON.stringify(freshIncomeCategories));
+    localStorage.setItem('kuma_expense_categories', JSON.stringify(freshExpenseCategories));
+
+    // Upload clean state to cloud for this new account
+    await uploadTransactionsToCloud(userSyncKey, freshTransactions);
     await uploadUserProfileToCloud(userSyncKey, {
       themeId: selectedThemeId,
-      incomeCategories,
-      expenseCategories,
-      monthlyBudgets,
-      savingsGoals,
-      bankAccounts
+      incomeCategories: freshIncomeCategories,
+      expenseCategories: freshExpenseCategories,
+      monthlyBudgets: freshBudgets,
+      savingsGoals: freshSavingsGoals,
+      bankAccounts: freshBankAccounts
     });
 
     setIsSyncing(false);
@@ -1181,6 +1244,7 @@ export default function App() {
       // Account filter
       const matchAccount = selectedAccountId === 'all' || 
         t.accountId === selectedAccountId || 
+        t.toAccountId === selectedAccountId ||
         (!t.accountId && selectedAccountId === defaultAccId);
       // Search text
       const matchSearch = searchQuery.trim() === '' || 
@@ -1226,12 +1290,27 @@ export default function App() {
   const summaryTotals = useMemo(() => {
     let income = 0;
     let expense = 0;
+    const defaultAccId = bankAccounts.find(a => a.isDefault)?.id || bankAccounts[0]?.id;
     
     // Calculate for selected month
     const monthlyItems = transactions.filter(t => t.date.startsWith(selectedMonth));
     monthlyItems.forEach(t => {
-      if (t.type === 'income') income += t.amount;
-      else expense += t.amount;
+      if (selectedAccountId === 'all') {
+        if (t.type === 'income') income += t.amount;
+        else if (t.type === 'expense') expense += t.amount;
+      } else {
+        const isSourceMatch = t.accountId === selectedAccountId || (!t.accountId && selectedAccountId === defaultAccId);
+        const isTargetMatch = t.toAccountId === selectedAccountId;
+
+        if (t.type === 'income' && isSourceMatch) income += t.amount;
+        else if (t.type === 'expense') {
+          if (isSourceMatch) expense += t.amount;
+          if (isTargetMatch) income += t.amount;
+        } else if (t.type === 'transfer') {
+          if (isSourceMatch) expense += t.amount;
+          if (isTargetMatch) income += t.amount;
+        }
+      }
     });
 
     return {
@@ -1239,7 +1318,7 @@ export default function App() {
       expense,
       balance: income - expense
     };
-  }, [transactions, selectedMonth]);
+  }, [transactions, selectedMonth, selectedAccountId, bankAccounts]);
 
   // --- Kuma Financial Insights Memo ---
   const kumaInsights = useMemo(() => {
@@ -2806,8 +2885,10 @@ export default function App() {
                                   </div>
 
                                   <div className="flex items-center gap-2.5 shrink-0">
-                                    <span className={`text-xs font-extrabold ${t.type === 'income' ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                      {t.type === 'income' ? '+' : '-'}฿{t.amount.toLocaleString()}
+                                    <span className={`text-xs font-extrabold ${
+                                      t.type === 'income' ? 'text-emerald-500' : t.type === 'transfer' ? 'text-sky-500' : 'text-rose-500'
+                                    }`}>
+                                      {t.type === 'income' ? '+' : t.type === 'transfer' ? '🔄 ' : '-'}฿{t.amount.toLocaleString()}
                                     </span>
                                     <div className="flex gap-1">
                                       <button
@@ -2892,8 +2973,21 @@ export default function App() {
                                 <span className="text-[9px] font-bold text-slate-400 block uppercase tracking-wider">{catDetail.name}{t.subCategory ? ` • ${t.subCategory}` : ''}</span>
                                 {(() => {
                                   const acc = bankAccounts.find(a => a.id === t.accountId) || bankAccounts.find(a => a.isDefault);
+                                  const targetAcc = t.toAccountId ? bankAccounts.find(a => a.id === t.toAccountId) : null;
                                   const preset = acc ? BANK_PRESETS.find(p => p.key === acc.bankKey) : null;
+                                  const targetPreset = targetAcc ? BANK_PRESETS.find(p => p.key === targetAcc.bankKey) : null;
                                   const pmLabel = t.paymentMethod === 'cash' ? '💵 เงินสด' : t.paymentMethod === 'credit' ? '💳 บัตร' : t.paymentMethod === 'promptpay' ? '✨ พร้อมเพย์' : '📱 โอน';
+                                  
+                                  if (t.type === 'transfer' || targetAcc) {
+                                    return (
+                                      <span className="text-[8px] font-extrabold bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300 px-1.5 py-0.2 rounded-md flex items-center gap-1">
+                                        <span>{preset ? preset.logoEmoji : '🏦'} {acc ? acc.name : 'ต้นทาง'}</span>
+                                        <span>➔</span>
+                                        <span>{targetPreset ? targetPreset.logoEmoji : '🏦'} {targetAcc ? targetAcc.name : 'ปลายทาง'}</span>
+                                      </span>
+                                    );
+                                  }
+
                                   return (
                                     <span className="text-[8px] font-extrabold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 px-1.5 py-0.2 rounded-md flex items-center gap-0.5">
                                       {preset ? preset.logoEmoji : '🏦'} {acc ? acc.name : 'บัญชี'} ({pmLabel})
@@ -2962,9 +3056,9 @@ export default function App() {
                           {/* Right Value & Edit/Delete Buttons Column */}
                           <div className="flex items-center gap-2 shrink-0">
                             <span className={`text-sm font-extrabold pr-1.5 ${
-                              t.type === 'income' ? 'text-emerald-500' : 'text-rose-500'
+                              t.type === 'income' ? 'text-emerald-500' : t.type === 'transfer' ? 'text-sky-500' : 'text-rose-500'
                             }`}>
-                              {t.type === 'income' ? '+' : '-'}฿{t.amount.toLocaleString(undefined, {minimumFractionDigits: 1})}
+                              {t.type === 'income' ? '+' : t.type === 'transfer' ? '🔄 ' : '-'}฿{t.amount.toLocaleString(undefined, {minimumFractionDigits: 1})}
                             </span>
 
                             <div className="flex gap-1">
@@ -3465,18 +3559,7 @@ export default function App() {
               secondaryBtnClass={currentTheme.secondary}
             />
 
-            {/* 4. Reminder Settings Panel */}
-            <ReminderPanel
-              settings={reminderSettings}
-              onSaveSettings={handleSaveReminderSettings}
-              isDark={isDark}
-              onTriggerTestNotification={handleTriggerTestNotification}
-              accentClass={currentTheme.accent}
-              enabledBgClass={currentTheme.primary.split(' ')[0]}
-              primaryBtnClass={currentTheme.primary}
-            />
-
-            {/* 5. Danger Zone / Reset Data */}
+            {/* 4. Danger Zone / Reset Data */}
             <div className={`p-4 rounded-3xl border transition-all ${
               isDark ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-100 shadow-sm'
             }`}>
@@ -4045,9 +4128,10 @@ export default function App() {
         transactions={transactions}
         onSaveAccounts={(updatedAccounts) => {
           setBankAccounts(updatedAccounts);
-          addToast('อัปเดตข้อมูลบัญชีธนาคารและเงินตั้งต้นเรียบร้อยแล้ว! 🏦✨', 'success');
+          addToast('อัปเดตข้อมูลบัญชีธนาคารเรียบร้อยแล้ว! 🏦✨', 'success');
         }}
         isDark={isDark}
+        addToast={addToast}
       />
     </motion.div>
   );

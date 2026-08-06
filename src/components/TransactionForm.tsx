@@ -39,6 +39,7 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
   const defaultAccount = accounts.find(a => a.isDefault) || accounts[0];
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('transfer');
   const [accountId, setAccountId] = useState<string>(defaultAccount?.id || '');
+  const [toAccountId, setToAccountId] = useState<string>('');
 
   // Sync default account if accounts prop updates
   useEffect(() => {
@@ -71,7 +72,11 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
   const [subCategory, setSubCategory] = useState<string>('');
   const [isRecurring, setIsRecurring] = useState<boolean>(false);
 
-  const categories = type === 'income' ? incomeCategories : expenseCategories;
+  const transferCategories: CategoryInfo[] = [
+    { id: 'transfer', name: 'โอนเงินระหว่างบัญชี', emoji: '🔄', color: 'text-sky-500', bgColor: 'bg-sky-100' }
+  ];
+
+  const categories = type === 'income' ? incomeCategories : type === 'transfer' ? transferCategories : expenseCategories;
 
   // React to editing target
   useEffect(() => {
@@ -86,6 +91,7 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
       setIsRecurring(editingTransaction.isRecurring || false);
       setPaymentMethod(editingTransaction.paymentMethod || 'transfer');
       setAccountId(editingTransaction.accountId || (accounts[0]?.id || ''));
+      setToAccountId(editingTransaction.toAccountId || '');
       
       // Handle backward compatibility for single slipImage vs multiple slipImages
       if (editingTransaction.slipImages && editingTransaction.slipImages.length > 0) {
@@ -112,8 +118,16 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
   // Adjust default category when type toggles
   const handleTypeChange = (newType: TransactionType) => {
     setType(newType);
-    const defaultCats = newType === 'income' ? incomeCategories : expenseCategories;
-    setCategory(defaultCats[0]?.id || 'others');
+    if (newType === 'transfer') {
+      setCategory('transfer');
+      setPaymentMethod('transfer');
+      const otherAcc = accounts.find(a => a.id !== accountId) || accounts[0];
+      if (otherAcc) setToAccountId(otherAcc.id);
+    } else {
+      const defaultCats = newType === 'income' ? incomeCategories : expenseCategories;
+      setCategory(defaultCats[0]?.id || 'others');
+      setToAccountId('');
+    }
     setSubCategory('');
   };
 
@@ -227,7 +241,23 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
       return;
     }
 
+    if (type === 'transfer') {
+      if (!toAccountId || accountId === toAccountId) {
+        if (addToast) {
+          addToast('กรุณาเลือกบัญชีปลายทางที่ต่างจากบัญชีต้นทางครับ 🥺', 'error');
+        } else {
+          alert('กรุณาเลือกบัญชีปลายทางที่ต่างจากบัญชีต้นทางครับ');
+        }
+        return;
+      }
+    }
+
     const selectedDay = parseInt(date.split('-')[2], 10) || 1;
+    const sourceAcc = accounts.find(a => a.id === accountId);
+    const targetAcc = accounts.find(a => a.id === toAccountId);
+    const defaultDesc = type === 'transfer'
+      ? `โอนเงินจาก ${sourceAcc?.name || 'ต้นทาง'} ไป ${targetAcc?.name || 'ปลายทาง'}`
+      : (categories.find(c => c.id === category)?.name || 'อื่นๆ');
 
     onSave({
       id: editingTransaction?.id,
@@ -235,7 +265,7 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
       amount: numAmount,
       category,
       subCategory: subCategory || undefined,
-      description: description.trim() || categories.find(c => c.id === category)?.name || 'อื่นๆ',
+      description: description.trim() || defaultDesc,
       date,
       time,
       slipImage: slipImages[0] || undefined,
@@ -243,7 +273,8 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
       isRecurring: type === 'expense' ? isRecurring : false,
       recurringDay: (type === 'expense' && isRecurring) ? selectedDay : undefined,
       paymentMethod,
-      accountId: accountId || (accounts[0]?.id || undefined)
+      accountId: accountId || (accounts[0]?.id || undefined),
+      toAccountId: (type === 'transfer' || toAccountId) ? toAccountId : undefined
     });
 
     // Reset fields if adding new
@@ -268,12 +299,12 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
   return (
     <>
       <form onSubmit={handleSubmit} className="space-y-4">
-      {/* Type Selector (Large, distinct tactile buttons) */}
-      <div className="grid grid-cols-2 gap-3">
+      {/* Type Selector (3 distinct tactile buttons) */}
+      <div className="grid grid-cols-3 gap-2">
         <button
           type="button"
           onClick={() => handleTypeChange('expense')}
-          className={`flex flex-col items-center justify-center py-4 px-4 rounded-3xl border-3 transition-all duration-200 active:scale-95 ${
+          className={`flex flex-col items-center justify-center py-3 px-2 rounded-2xl border-2 transition-all duration-200 active:scale-95 ${
             type === 'expense'
               ? 'bg-rose-500 text-white border-rose-600 shadow-md shadow-rose-500/20 scale-[1.02]'
               : isDark
@@ -281,14 +312,14 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
                 : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
           }`}
         >
-          <span className="text-3xl mb-1">💸</span>
-          <span className="text-base font-extrabold">รายจ่าย</span>
-          <span className="text-[10px] opacity-80 font-semibold uppercase tracking-wider">Expense</span>
+          <span className="text-2xl mb-0.5">💸</span>
+          <span className="text-xs font-extrabold">รายจ่าย</span>
+          <span className="text-[9px] opacity-80 font-semibold uppercase tracking-wider">Expense</span>
         </button>
         <button
           type="button"
           onClick={() => handleTypeChange('income')}
-          className={`flex flex-col items-center justify-center py-4 px-4 rounded-3xl border-3 transition-all duration-200 active:scale-95 ${
+          className={`flex flex-col items-center justify-center py-3 px-2 rounded-2xl border-2 transition-all duration-200 active:scale-95 ${
             type === 'income'
               ? 'bg-emerald-500 text-white border-emerald-600 shadow-md shadow-emerald-500/20 scale-[1.02]'
               : isDark
@@ -296,9 +327,24 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
                 : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
           }`}
         >
-          <span className="text-3xl mb-1">💰</span>
-          <span className="text-base font-extrabold">รายรับ</span>
-          <span className="text-[10px] opacity-80 font-semibold uppercase tracking-wider">Income</span>
+          <span className="text-2xl mb-0.5">💰</span>
+          <span className="text-xs font-extrabold">รายรับ</span>
+          <span className="text-[9px] opacity-80 font-semibold uppercase tracking-wider">Income</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => handleTypeChange('transfer')}
+          className={`flex flex-col items-center justify-center py-3 px-2 rounded-2xl border-2 transition-all duration-200 active:scale-95 ${
+            type === 'transfer'
+              ? 'bg-sky-500 text-white border-sky-600 shadow-md shadow-sky-500/20 scale-[1.02]'
+              : isDark
+                ? 'bg-slate-800/40 border-slate-700 text-slate-400 hover:bg-slate-800'
+                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <span className="text-2xl mb-0.5">🔄</span>
+          <span className="text-xs font-extrabold">โอนเงิน</span>
+          <span className="text-[9px] opacity-80 font-semibold uppercase tracking-wider">Transfer</span>
         </button>
       </div>
 
@@ -309,7 +355,9 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
         </label>
         <div className="relative">
           <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-            <span className={`text-lg font-bold ${type === 'expense' ? 'text-rose-500' : 'text-emerald-500'}`}>฿</span>
+            <span className={`text-lg font-bold ${
+              type === 'expense' ? 'text-rose-500' : type === 'income' ? 'text-emerald-500' : 'text-sky-500'
+            }`}>฿</span>
           </div>
           <input
             type="number"
@@ -410,56 +458,122 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
           </div>
         </div>
 
-        {/* Bank Account Selection (ถ้ามีหลายบัญชี) */}
+        {/* Bank Account Selection */}
         {accounts.length > 0 && (
-          <div className="pt-1">
-            <div className="flex items-center justify-between mb-1.5">
-              <label className={`text-xs font-bold flex items-center gap-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                <Landmark size={14} className="text-amber-500" />
-                <span>บัญชี{type === 'expense' ? 'ที่ตัดเงิน' : 'ที่รับเข้า'} ({accounts.length} บัญชี)</span>
-              </label>
-              {onOpenAccountManager && (
-                <button
-                  type="button"
-                  onClick={onOpenAccountManager}
-                  className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5"
-                >
-                  + จัดการบัญชี/เงินตั้งต้น
-                </button>
-              )}
+          <div className="pt-1 space-y-3">
+            {/* Primary / Source Account */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className={`text-xs font-bold flex items-center gap-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                  <Landmark size={14} className={type === 'transfer' ? 'text-rose-500' : 'text-amber-500'} />
+                  <span>
+                    {type === 'transfer' 
+                      ? '📤 บัญชีต้นทาง (โอนออกจากบัญชีนี้)' 
+                      : `บัญชี${type === 'expense' ? 'ที่ตัดเงิน' : 'ที่รับเข้า'} (${accounts.length} บัญชี)`}
+                  </span>
+                </label>
+                {onOpenAccountManager && (
+                  <button
+                    type="button"
+                    onClick={onOpenAccountManager}
+                    className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5"
+                  >
+                    + จัดการบัญชี
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                {accounts.map((acc) => {
+                  const preset = BANK_PRESETS.find(p => p.key === acc.bankKey) || BANK_PRESETS[BANK_PRESETS.length - 1];
+                  const isSelected = accountId === acc.id;
+                  return (
+                    <button
+                      key={acc.id}
+                      type="button"
+                      onClick={() => {
+                        setAccountId(acc.id);
+                        if (acc.bankKey === 'cash') {
+                          setPaymentMethod('cash');
+                        }
+                        // If same as target account in transfer mode, change target account
+                        if (type === 'transfer' && toAccountId === acc.id) {
+                          const other = accounts.find(a => a.id !== acc.id);
+                          if (other) setToAccountId(other.id);
+                        }
+                      }}
+                      className={`px-3 py-2 rounded-xl text-xs font-extrabold border transition-all flex items-center gap-2 active:scale-95 ${
+                        isSelected
+                          ? isDark
+                            ? 'bg-slate-800 border-emerald-500 text-emerald-400 shadow-xs ring-1 ring-emerald-500'
+                            : 'bg-white border-emerald-500 text-emerald-700 shadow-xs ring-1 ring-emerald-500'
+                          : isDark
+                            ? 'bg-slate-950/70 border-slate-800 text-slate-400 hover:bg-slate-850'
+                            : 'bg-white/80 border-slate-200 text-slate-700 hover:bg-white'
+                      }`}
+                    >
+                      <span className="text-sm">{preset.logoEmoji}</span>
+                      <div className="text-left leading-tight">
+                        <span>{acc.name}</span>
+                        {acc.accountNumber && (
+                          <span className="text-[9px] text-slate-400 font-normal block">{acc.accountNumber}</span>
+                        )}
+                      </div>
+                      {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            <div className="flex flex-wrap gap-1.5">
-              {accounts.map((acc) => {
-                const preset = BANK_PRESETS.find(p => p.key === acc.bankKey) || BANK_PRESETS[BANK_PRESETS.length - 1];
-                const isSelected = accountId === acc.id;
-                return (
-                  <button
-                    key={acc.id}
-                    type="button"
-                    onClick={() => {
-                      setAccountId(acc.id);
-                      if (acc.bankKey === 'cash') {
-                        setPaymentMethod('cash');
-                      }
-                    }}
-                    className={`px-3 py-2 rounded-xl text-xs font-extrabold border transition-all flex items-center gap-2 active:scale-95 ${
-                      isSelected
-                        ? isDark
-                          ? 'bg-slate-800 border-emerald-500 text-emerald-400 shadow-xs ring-1 ring-emerald-500'
-                          : 'bg-white border-emerald-500 text-emerald-700 shadow-xs ring-1 ring-emerald-500'
-                        : isDark
-                          ? 'bg-slate-950/70 border-slate-800 text-slate-400 hover:bg-slate-850'
-                          : 'bg-white/80 border-slate-200 text-slate-700 hover:bg-white'
-                    }`}
-                  >
-                    <span className="text-sm">{preset.logoEmoji}</span>
-                    <span>{acc.name}</span>
-                    {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
-                  </button>
-                );
-              })}
-            </div>
+            {/* Target Account (When type is 'transfer' or when toAccountId is selected) */}
+            {type === 'transfer' && (
+              <div className="pt-2 border-t border-slate-200 dark:border-slate-800 animate-fade-in">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className={`text-xs font-bold flex items-center gap-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                    <Landmark size={14} className="text-emerald-500" />
+                    <span>📥 บัญชีปลายทาง (รับเงินเข้าบัญชีนี้)</span>
+                  </label>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  {accounts.map((acc) => {
+                    const preset = BANK_PRESETS.find(p => p.key === acc.bankKey) || BANK_PRESETS[BANK_PRESETS.length - 1];
+                    const isSelected = toAccountId === acc.id;
+                    const isSource = accountId === acc.id;
+                    return (
+                      <button
+                        key={acc.id}
+                        type="button"
+                        disabled={isSource}
+                        onClick={() => setToAccountId(acc.id)}
+                        className={`px-3 py-2 rounded-xl text-xs font-extrabold border transition-all flex items-center gap-2 active:scale-95 ${
+                          isSource 
+                            ? 'opacity-40 cursor-not-allowed bg-slate-100 dark:bg-slate-900 border-slate-200 text-slate-400'
+                            : isSelected
+                              ? isDark
+                                ? 'bg-slate-800 border-sky-500 text-sky-400 shadow-xs ring-1 ring-sky-500'
+                                : 'bg-white border-sky-500 text-sky-700 shadow-xs ring-1 ring-sky-500'
+                              : isDark
+                                ? 'bg-slate-950/70 border-slate-800 text-slate-400 hover:bg-slate-850'
+                                : 'bg-white/80 border-slate-200 text-slate-700 hover:bg-white'
+                        }`}
+                      >
+                        <span className="text-sm">{preset.logoEmoji}</span>
+                        <div className="text-left leading-tight">
+                          <span>{acc.name}</span>
+                          {acc.accountNumber && (
+                            <span className="text-[9px] text-slate-400 font-normal block">{acc.accountNumber}</span>
+                          )}
+                        </div>
+                        {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-sky-500 shrink-0" />}
+                        {isSource && <span className="text-[9px] font-normal shrink-0">(ต้นทาง)</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
