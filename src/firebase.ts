@@ -344,7 +344,12 @@ export async function downloadCategoriesFromCloud(syncKey: string): Promise<{ in
 }
 
 // Clear all cloud data (transactions & profile info) under a specific Sync Key
-export async function clearAllCloudData(syncKey: string, defaultIncomeCats: any[], defaultExpenseCats: any[]): Promise<boolean> {
+export async function clearAllCloudData(
+  syncKey: string, 
+  defaultIncomeCats: any[], 
+  defaultExpenseCats: any[],
+  defaultBankAccounts?: any[]
+): Promise<boolean> {
   try {
     if (!syncKey) return false;
     const key = syncKey.toUpperCase();
@@ -358,7 +363,8 @@ export async function clearAllCloudData(syncKey: string, defaultIncomeCats: any[
       monthlyBudgets: {},
       savingsGoals: [],
       incomeCategories: JSON.parse(JSON.stringify(defaultIncomeCats)),
-      expenseCategories: JSON.parse(JSON.stringify(defaultExpenseCats))
+      expenseCategories: JSON.parse(JSON.stringify(defaultExpenseCats)),
+      bankAccounts: defaultBankAccounts ? JSON.parse(JSON.stringify(defaultBankAccounts)) : []
     });
 
     // 2. Delete ALL transactions in subcollection in chunks of 400

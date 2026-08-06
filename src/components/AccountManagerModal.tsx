@@ -34,6 +34,7 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingInitialId, setEditingInitialId] = useState<string | null>(null);
   const [editingInitialValue, setEditingInitialValue] = useState<string>('');
+  const [editBalanceMode, setEditBalanceMode] = useState<'current' | 'initial'>('current');
 
   // Form states for new account
   const [bankKey, setBankKey] = useState<BankType>('kbank');
@@ -110,22 +111,44 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
   };
 
   const handleSaveInitialBalance = (id: string) => {
-    const newVal = parseFloat(editingInitialValue);
-    if (isNaN(newVal)) {
+    const inputVal = parseFloat(editingInitialValue);
+    if (isNaN(inputVal)) {
       if (addToast) addToast('กรุณากรอกจำนวนเงินให้ถูกต้องครับ 🥺', 'error');
       return;
     }
 
+    let finalInitialBalance = inputVal;
+
+    if (editBalanceMode === 'current') {
+      const defaultAcc = accounts.find(a => a.isDefault) || accounts[0];
+      let income = 0;
+      let expense = 0;
+      (transactions || []).forEach((tx) => {
+        const isMatch = tx.accountId === id || (!tx.accountId && defaultAcc?.id === id);
+        if (isMatch) {
+          if (tx.type === 'income') income += tx.amount;
+          if (tx.type === 'expense') expense += tx.amount;
+        }
+      });
+      // Target Current = Initial + Income - Expense
+      // So Initial = Target Current - Income + Expense
+      finalInitialBalance = inputVal - income + expense;
+    }
+
     if (onUpdateAccount) {
-      onUpdateAccount(id, { initialBalance: newVal });
+      onUpdateAccount(id, { initialBalance: finalInitialBalance });
     } else if (onSaveAccounts) {
-      const updated = accounts.map(a => a.id === id ? { ...a, initialBalance: newVal } : a);
+      const updated = accounts.map(a => a.id === id ? { ...a, initialBalance: finalInitialBalance } : a);
       onSaveAccounts(updated);
     }
 
     setEditingInitialId(null);
     if (addToast) {
-      addToast('อัปเดตเงินตั้งต้นเรียบร้อยแล้วครับ! 💰✨', 'success');
+      if (editBalanceMode === 'current') {
+        addToast(`ปรับยอดเงินคงเหลือปัจจุบันเป็น ฿${inputVal.toLocaleString()} เรียบร้อยแล้วครับ! 💰✨`, 'success');
+      } else {
+        addToast(`อัปเดตเงินตั้งต้นเป็น ฿${finalInitialBalance.toLocaleString()} เรียบร้อยแล้วครับ! 💰✨`, 'success');
+      }
     }
   };
 
@@ -300,65 +323,49 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
                   <div className={`mt-3 pt-3 border-t grid grid-cols-2 gap-2 text-xs ${
                     isDark ? 'border-slate-800/80' : 'border-slate-100'
                   }`}>
-                    {/* Initial Balance */}
+                    {/* Initial Balance Box */}
                     <div className={`p-2.5 rounded-xl border ${
                       isDark ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-100'
                     }`}>
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-[10px] font-bold text-slate-400">
-                          🌱 เงินตั้งต้น (Starting):
+                          🌱 เงินตั้งต้นก่อนจด:
                         </span>
-                        {!isEditing && (
-                          <button
-                            onClick={() => {
-                              setEditingInitialId(acc.id);
-                              setEditingInitialValue(acc.initialBalance.toString());
-                            }}
-                            className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5"
-                          >
-                            <Edit2 size={10} /> แก้ไข
-                          </button>
-                        )}
+                        <button
+                          onClick={() => {
+                            setEditingInitialId(acc.id);
+                            setEditBalanceMode('initial');
+                            setEditingInitialValue(acc.initialBalance.toString());
+                          }}
+                          className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5"
+                        >
+                          <Edit2 size={10} /> แก้ไข
+                        </button>
                       </div>
-
-                      {isEditing ? (
-                        <div className="flex items-center gap-1 mt-1">
-                          <input
-                            type="number"
-                            step="any"
-                            value={editingInitialValue}
-                            onChange={(e) => setEditingInitialValue(e.target.value)}
-                            className="w-full px-2 py-1 text-xs font-bold rounded-lg border bg-white dark:bg-slate-900 border-emerald-500 focus:outline-none"
-                            placeholder="0.00"
-                            autoFocus
-                          />
-                          <button
-                            onClick={() => handleSaveInitialBalance(acc.id)}
-                            className="p-1.5 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-colors"
-                          >
-                            <Check size={12} />
-                          </button>
-                          <button
-                            onClick={() => setEditingInitialId(null)}
-                            className="p-1.5 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
-                          >
-                            <X size={12} />
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="text-sm font-extrabold text-slate-700 dark:text-slate-200">
-                          ฿{acc.initialBalance.toLocaleString('th-TH', { minimumFractionDigits: 0 })}
-                        </div>
-                      )}
+                      <div className="text-sm font-extrabold text-slate-700 dark:text-slate-200">
+                        ฿{acc.initialBalance.toLocaleString('th-TH', { minimumFractionDigits: 0 })}
+                      </div>
                     </div>
 
-                    {/* Current Net Balance */}
+                    {/* Current Net Balance Box */}
                     <div className={`p-2.5 rounded-xl border ${
                       isDark ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-100'
                     }`}>
-                      <span className="text-[10px] font-bold text-slate-400 block mb-1">
-                        💳 ยอดเงินคงเหลือสุทธิ:
-                      </span>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-bold text-slate-400">
+                          💳 ยอดคงเหลือปัจจุบัน:
+                        </span>
+                        <button
+                          onClick={() => {
+                            setEditingInitialId(acc.id);
+                            setEditBalanceMode('current');
+                            setEditingInitialValue(currentNet.toString());
+                          }}
+                          className="text-[10px] font-bold text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-0.5"
+                        >
+                          <Edit2 size={10} /> ปรับยอด
+                        </button>
+                      </div>
                       <div className={`text-sm font-black ${
                         currentNet >= 0 ? 'text-emerald-500' : 'text-rose-500'
                       }`}>
@@ -366,6 +373,85 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
                       </div>
                     </div>
                   </div>
+
+                  {/* Inline Balance Edit Panel */}
+                  {isEditing && (
+                    <div className={`mt-3 p-3 rounded-xl border space-y-2 animate-fade-in ${
+                      isDark ? 'bg-slate-950 border-emerald-500/50' : 'bg-emerald-50/60 border-emerald-300'
+                    }`}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-extrabold text-slate-700 dark:text-slate-200">
+                          ⚙️ ตั้งค่ายอดเงินบัญชี "{acc.name}"
+                        </span>
+                        <button
+                          onClick={() => setEditingInitialId(null)}
+                          className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+
+                      {/* Mode selector tab */}
+                      <div className="grid grid-cols-2 gap-1 p-1 bg-slate-200/60 dark:bg-slate-850 rounded-lg text-[10px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditBalanceMode('current');
+                            setEditingInitialValue(currentNet.toString());
+                          }}
+                          className={`py-1 rounded-md transition-all ${
+                            editBalanceMode === 'current'
+                              ? 'bg-emerald-500 text-white shadow-xs'
+                              : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                          }`}
+                        >
+                          💳 ยอดที่มีอยู่ตอนนี้
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditBalanceMode('initial');
+                            setEditingInitialValue(acc.initialBalance.toString());
+                          }}
+                          className={`py-1 rounded-md transition-all ${
+                            editBalanceMode === 'initial'
+                              ? 'bg-emerald-500 text-white shadow-xs'
+                              : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                          }`}
+                        >
+                          🌱 เงินตั้งต้นก่อนจด
+                        </button>
+                      </div>
+
+                      {/* Helper description */}
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                        {editBalanceMode === 'current' 
+                          ? '💡 ระบุจำนวนเงินคงเหลือในแอปธนาคาร/กระเป๋าเงินที่มีอยู่จริงขณะนี้ ระบบจะปรับเงินตั้งต้นให้อัตโนมัติ'
+                          : '💡 ระบุเงินตั้งต้นก้อนแรกสุดก่อนเริ่มจดรายรับ-รายจ่าย'}
+                      </p>
+
+                      <div className="flex items-center gap-1.5">
+                        <div className="relative flex-1">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">฿</span>
+                          <input
+                            type="number"
+                            step="any"
+                            value={editingInitialValue}
+                            onChange={(e) => setEditingInitialValue(e.target.value)}
+                            className="w-full pl-6 pr-2 py-1.5 text-xs font-extrabold rounded-lg border bg-white dark:bg-slate-900 border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            placeholder="0.00"
+                            autoFocus
+                          />
+                        </div>
+                        <button
+                          onClick={() => handleSaveInitialBalance(acc.id)}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-500 text-white text-xs font-bold hover:bg-emerald-600 transition-colors flex items-center gap-1 shrink-0 shadow-xs active:scale-95"
+                        >
+                          <Check size={14} /> บันทึก
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}

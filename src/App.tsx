@@ -829,16 +829,18 @@ export default function App() {
         setTransactions(INITIAL_TRANSACTIONS);
         localStorage.setItem('kuma_transactions', JSON.stringify(INITIAL_TRANSACTIONS));
 
-        // Reset categories, budgets, and savings goals
+        // Reset categories, budgets, savings goals, and bank accounts
         setIncomeCategories(INCOME_CATEGORIES);
         setExpenseCategories(EXPENSE_CATEGORIES);
         setMonthlyBudgets({});
         setSavingsGoals([]);
+        setBankAccounts(DEFAULT_BANK_ACCOUNTS);
 
         localStorage.setItem('kuma_income_categories', JSON.stringify(INCOME_CATEGORIES));
         localStorage.setItem('kuma_expense_categories', JSON.stringify(EXPENSE_CATEGORIES));
         localStorage.setItem('kuma_monthly_budgets', JSON.stringify({}));
         localStorage.setItem('kuma_savings_goals', JSON.stringify([]));
+        localStorage.setItem('kuma_bank_accounts', JSON.stringify(DEFAULT_BANK_ACCOUNTS));
         
         addToast('ออกจากระบบและล้างข้อมูลส่วนตัวในเครื่องเรียบร้อยแล้วน้า บ๊ายบายครับ! 👋🧸', 'success');
       },
@@ -1128,6 +1130,7 @@ export default function App() {
             setTransactions([]);
             setMonthlyBudgets({});
             setSavingsGoals([]);
+            setBankAccounts(DEFAULT_BANK_ACCOUNTS);
             setIncomeCategories(INCOME_CATEGORIES);
             setExpenseCategories(EXPENSE_CATEGORIES);
 
@@ -1135,12 +1138,13 @@ export default function App() {
             localStorage.setItem('kuma_transactions', JSON.stringify([]));
             localStorage.setItem('kuma_monthly_budgets', JSON.stringify({}));
             localStorage.setItem('kuma_savings_goals', JSON.stringify([]));
+            localStorage.setItem('kuma_bank_accounts', JSON.stringify(DEFAULT_BANK_ACCOUNTS));
             localStorage.setItem('kuma_income_categories', JSON.stringify(INCOME_CATEGORIES));
             localStorage.setItem('kuma_expense_categories', JSON.stringify(EXPENSE_CATEGORIES));
 
             if (syncKey) {
               setIsSyncing(true);
-              const success = await clearAllCloudData(syncKey, INCOME_CATEGORIES, EXPENSE_CATEGORIES);
+              const success = await clearAllCloudData(syncKey, INCOME_CATEGORIES, EXPENSE_CATEGORIES, DEFAULT_BANK_ACCOUNTS);
               setIsSyncing(false);
               if (success) {
                 const now = Date.now();
