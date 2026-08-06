@@ -101,6 +101,7 @@ export const INCOME_CATEGORIES: CategoryInfo[] = [
   { id: 'freelance', name: 'งานเสริม', emoji: '💻', color: 'text-cyan-500', bgColor: 'bg-cyan-100' },
   { id: 'investment', name: 'ลงทุน', emoji: '📈', color: 'text-indigo-500', bgColor: 'bg-indigo-100' },
   { id: 'allowance', name: 'ค่าขนม', emoji: '🎁', color: 'text-pink-500', bgColor: 'bg-pink-100' },
+  { id: 'debt_received', name: 'กู้ยืม / ได้รับคืน', emoji: '🏦', color: 'text-purple-500', bgColor: 'bg-purple-100', subCategories: ['กู้เงินธนาคาร/สินเชื่อ', 'ยืมเงินเพื่อน/ญาติ', 'ลูกหนี้คืนเงิน', 'เบิกเงินล่วงหน้า'] },
   { id: 'others', name: 'รายรับอื่นๆ', emoji: '🪙', color: 'text-amber-500', bgColor: 'bg-amber-100' }
 ];
 
@@ -117,7 +118,14 @@ export const EXPENSE_CATEGORIES: CategoryInfo[] = [
   { id: 'family', name: 'ครอบครัว & บุตรหลาน', emoji: '👶', color: 'text-amber-600', bgColor: 'bg-amber-100' },
   { id: 'pets', name: 'สัตว์เลี้ยงแสนรัก', emoji: '🐱', color: 'text-yellow-600', bgColor: 'bg-yellow-100' },
   { id: 'investment', name: 'ออมเงิน & การลงทุน', emoji: '🐷', color: 'text-emerald-500', bgColor: 'bg-emerald-100' },
-  { id: 'debts', name: 'ผ่อนชำระ & บัตรเครดิต', emoji: '💳', color: 'text-violet-500', bgColor: 'bg-violet-100' },
+  { 
+    id: 'debts', 
+    name: 'หมวดหนี้สิน & ชำระผ่อน', 
+    emoji: '💳', 
+    color: 'text-violet-500', 
+    bgColor: 'bg-violet-100',
+    subCategories: ['ผ่อนบ้าน/คอนโด', 'ผ่อนรถยนต์/มอเตอร์ไซค์', 'ชำระบัตรเครดิต', 'สินเชื่อ/กู้ยืมเงิน', 'ยืมเงินเพื่อน/คืนเงิน', 'หนี้สินอื่นๆ'] 
+  },
   { id: 'social', name: 'สังสรรค์ & ของขวัญ & งานบุญ', emoji: '🍻', color: 'text-red-500', bgColor: 'bg-red-100' },
   { id: 'maintenance', name: 'ซ่อมบำรุงบ้าน/รถ', emoji: '🔧', color: 'text-stone-500', bgColor: 'bg-stone-100' },
   { id: 'tax', name: 'ภาษี & ค่าธรรมเนียม', emoji: '🧾', color: 'text-slate-600', bgColor: 'bg-slate-100' },

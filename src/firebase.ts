@@ -85,7 +85,7 @@ export function subscribeToTransactions(
   }
 }
 
-// Real-time listener for profile (theme, categories, budgets & goals)
+// Real-time listener for profile (theme, categories, budgets, goals & bank accounts)
 export function subscribeToProfile(
   syncKey: string,
   onData: (data: { 
@@ -94,6 +94,7 @@ export function subscribeToProfile(
     themeId?: string;
     monthlyBudgets?: Record<string, number>;
     savingsGoals?: any[];
+    bankAccounts?: any[];
   }) => void,
   onError?: (err: any) => void
 ): () => void {
@@ -260,6 +261,7 @@ export async function uploadUserProfileToCloud(
     expenseCategories?: any[];
     monthlyBudgets?: Record<string, number>;
     savingsGoals?: any[];
+    bankAccounts?: any[];
   }
 ): Promise<boolean> {
   try {
@@ -283,6 +285,7 @@ export async function downloadUserProfileFromCloud(syncKey: string): Promise<{
   expenseCategories?: any[];
   monthlyBudgets?: Record<string, number>;
   savingsGoals?: any[];
+  bankAccounts?: any[];
 } | null> {
   try {
     if (!syncKey) return null;

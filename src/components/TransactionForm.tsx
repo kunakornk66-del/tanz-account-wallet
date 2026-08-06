@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Transaction, TransactionType } from '../types';
+import { Transaction, TransactionType, BankAccount, PaymentMethod, BANK_PRESETS } from '../types';
 import { CategoryInfo } from '../themes';
-import { Calendar, Clock, DollarSign, Edit3, Plus, Sparkles, Tag, X, Paperclip, Trash2, Image as ImageIcon, Check, AlertCircle, FileText, Repeat } from 'lucide-react';
+import { Calendar, Clock, DollarSign, Edit3, Plus, Sparkles, Tag, X, Paperclip, Trash2, Image as ImageIcon, Check, AlertCircle, FileText, Repeat, CreditCard, Landmark, Wallet } from 'lucide-react';
 
 interface TransactionFormProps {
   onSave: (transaction: Omit<Transaction, 'id' | 'createdAt'> & { id?: string }) => void;
@@ -13,6 +13,8 @@ interface TransactionFormProps {
   defaultDate?: string;
   incomeCategories: CategoryInfo[];
   expenseCategories: CategoryInfo[];
+  accounts?: BankAccount[];
+  onOpenAccountManager?: () => void;
 }
 
 export const TransactionForm: React.FC<TransactionFormProps> = ({
@@ -24,13 +26,29 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
   addToast,
   defaultDate,
   incomeCategories,
-  expenseCategories
+  expenseCategories,
+  accounts = [],
+  onOpenAccountManager
 }) => {
   const [type, setType] = useState<TransactionType>('expense');
   const [amount, setAmount] = useState<string>('');
   const [category, setCategory] = useState<string>('');
   const [description, setDescription] = useState<string>('');
   
+  // Payment method & Account states
+  const defaultAccount = accounts.find(a => a.isDefault) || accounts[0];
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('transfer');
+  const [accountId, setAccountId] = useState<string>(defaultAccount?.id || '');
+
+  // Sync default account if accounts prop updates
+  useEffect(() => {
+    if (!accountId && accounts.length > 0) {
+      const def = accounts.find(a => a.isDefault) || accounts[0];
+      setAccountId(def.id);
+      if (def.bankKey === 'cash') setPaymentMethod('cash');
+    }
+  }, [accounts, accountId]);
+
   // Prefill current date/time in local time
   const getLocalDateString = () => {
     const d = new Date();
@@ -66,6 +84,8 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
       setDate(editingTransaction.date);
       setTime(editingTransaction.time);
       setIsRecurring(editingTransaction.isRecurring || false);
+      setPaymentMethod(editingTransaction.paymentMethod || 'transfer');
+      setAccountId(editingTransaction.accountId || (accounts[0]?.id || ''));
       
       // Handle backward compatibility for single slipImage vs multiple slipImages
       if (editingTransaction.slipImages && editingTransaction.slipImages.length > 0) {
@@ -221,7 +241,9 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
       slipImage: slipImages[0] || undefined,
       slipImages: slipImages.length > 0 ? slipImages : undefined,
       isRecurring: type === 'expense' ? isRecurring : false,
-      recurringDay: (type === 'expense' && isRecurring) ? selectedDay : undefined
+      recurringDay: (type === 'expense' && isRecurring) ? selectedDay : undefined,
+      paymentMethod,
+      accountId: accountId || (accounts[0]?.id || undefined)
     });
 
     // Reset fields if adding new
@@ -332,6 +354,114 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
             🧹 ล้างทั้งหมด
           </button>
         </div>
+      </div>
+
+      {/* Payment Method & Bank Account Selector */}
+      <div className={`p-3.5 rounded-2xl border space-y-3 ${
+        isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50/70 border-slate-200/80'
+      }`}>
+        {/* Payment Method (เงินสด vs เงินโอน vs พร้อมเพย์ vs บัตรเครดิต) */}
+        <div>
+          <label className={`block text-xs font-bold mb-1.5 flex items-center justify-between ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+            <span className="flex items-center gap-1.5">
+              <Wallet size={14} className="text-emerald-500" />
+              <span>ช่องทางการ{type === 'expense' ? 'ชำระเงิน' : 'รับเงิน'}</span>
+            </span>
+            <span className="text-[10px] font-medium text-slate-400">เงินสด / เงินโอน</span>
+          </label>
+          <div className="grid grid-cols-4 gap-1.5">
+            {[
+              { id: 'transfer', label: 'เงินโอน', emoji: '📱', color: 'sky' },
+              { id: 'cash', label: 'เงินสด', emoji: '💵', color: 'emerald' },
+              { id: 'promptpay', label: 'พร้อมเพย์', emoji: '✨', color: 'purple' },
+              { id: 'credit', label: 'บัตรเครดิต', emoji: '💳', color: 'rose' }
+            ].map((method) => {
+              const isSelected = paymentMethod === method.id;
+              return (
+                <button
+                  key={method.id}
+                  type="button"
+                  onClick={() => {
+                    setPaymentMethod(method.id as PaymentMethod);
+                    // Auto select cash account if cash selected
+                    if (method.id === 'cash') {
+                      const cashAcc = accounts.find(a => a.bankKey === 'cash');
+                      if (cashAcc) setAccountId(cashAcc.id);
+                    } else if (paymentMethod === 'cash') {
+                      const nonCashAcc = accounts.find(a => a.bankKey !== 'cash') || accounts[0];
+                      if (nonCashAcc) setAccountId(nonCashAcc.id);
+                    }
+                  }}
+                  className={`py-2 px-1 rounded-xl text-xs font-bold border transition-all flex flex-col items-center justify-center gap-0.5 active:scale-95 ${
+                    isSelected
+                      ? isDark
+                        ? 'bg-slate-800 border-emerald-500 text-emerald-400 ring-1 ring-emerald-500/50 shadow-xs'
+                        : 'bg-white border-emerald-500 text-emerald-600 ring-1 ring-emerald-500/30 shadow-xs'
+                      : isDark
+                        ? 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                        : 'bg-white/70 border-slate-200 text-slate-600 hover:bg-white'
+                  }`}
+                >
+                  <span className="text-base">{method.emoji}</span>
+                  <span className="text-[10px]">{method.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Bank Account Selection (ถ้ามีหลายบัญชี) */}
+        {accounts.length > 0 && (
+          <div className="pt-1">
+            <div className="flex items-center justify-between mb-1.5">
+              <label className={`text-xs font-bold flex items-center gap-1.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                <Landmark size={14} className="text-amber-500" />
+                <span>บัญชี{type === 'expense' ? 'ที่ตัดเงิน' : 'ที่รับเข้า'} ({accounts.length} บัญชี)</span>
+              </label>
+              {onOpenAccountManager && (
+                <button
+                  type="button"
+                  onClick={onOpenAccountManager}
+                  className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5"
+                >
+                  + จัดการบัญชี/เงินตั้งต้น
+                </button>
+              )}
+            </div>
+
+            <div className="flex flex-wrap gap-1.5">
+              {accounts.map((acc) => {
+                const preset = BANK_PRESETS.find(p => p.key === acc.bankKey) || BANK_PRESETS[BANK_PRESETS.length - 1];
+                const isSelected = accountId === acc.id;
+                return (
+                  <button
+                    key={acc.id}
+                    type="button"
+                    onClick={() => {
+                      setAccountId(acc.id);
+                      if (acc.bankKey === 'cash') {
+                        setPaymentMethod('cash');
+                      }
+                    }}
+                    className={`px-3 py-2 rounded-xl text-xs font-extrabold border transition-all flex items-center gap-2 active:scale-95 ${
+                      isSelected
+                        ? isDark
+                          ? 'bg-slate-800 border-emerald-500 text-emerald-400 shadow-xs ring-1 ring-emerald-500'
+                          : 'bg-white border-emerald-500 text-emerald-700 shadow-xs ring-1 ring-emerald-500'
+                        : isDark
+                          ? 'bg-slate-950/70 border-slate-800 text-slate-400 hover:bg-slate-850'
+                          : 'bg-white/80 border-slate-200 text-slate-700 hover:bg-white'
+                    }`}
+                  >
+                    <span className="text-sm">{preset.logoEmoji}</span>
+                    <span>{acc.name}</span>
+                    {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Category selector grid */}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'motion/react';
 import confetti from 'canvas-confetti';
-import { Transaction, ThemeType, ReminderSettings, SavingsGoal } from './types';
+import { Transaction, ThemeType, ReminderSettings, SavingsGoal, BankAccount, BANK_PRESETS } from './types';
 import { APP_THEMES, getCategoryDetails, INCOME_CATEGORIES, EXPENSE_CATEGORIES, CategoryInfo } from './themes';
 import { TransactionForm } from './components/TransactionForm';
 import { FinancialCharts } from './components/FinancialCharts';
@@ -11,6 +11,32 @@ import { ReminderPanel } from './components/ReminderPanel';
 import { Toast, ToastContainer, ToastType } from './components/NotificationToast';
 import { AuthModal } from './components/AuthModal';
 import { CategoryManager } from './components/CategoryManager';
+import { AccountManagerModal } from './components/AccountManagerModal';
+import { BankAccountsOverview } from './components/BankAccountsOverview';
+
+const DEFAULT_BANK_ACCOUNTS: BankAccount[] = [
+  {
+    id: 'acc_cash',
+    name: 'เงินสด',
+    bankKey: 'cash',
+    initialBalance: 0,
+    isDefault: true
+  },
+  {
+    id: 'acc_kbank',
+    name: 'ธนาคารกสิกรไทย',
+    bankKey: 'kbank',
+    initialBalance: 0,
+    isDefault: false
+  },
+  {
+    id: 'acc_scb',
+    name: 'ธนาคารไทยพาณิชย์',
+    bankKey: 'scb',
+    initialBalance: 0,
+    isDefault: false
+  }
+];
 import { 
   generateSyncKey, 
   uploadTransactionsToCloud, 
@@ -189,8 +215,38 @@ export default function App() {
   const [goalActionType, setGoalActionType] = useState<'deposit' | 'withdraw'>('deposit');
   const [goalActionAmount, setGoalActionAmount] = useState('');
 
+  // --- Multi-Account & Initial Balance States ---
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>(() => {
+    const stored = localStorage.getItem('kuma_bank_accounts');
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {
+        console.error("Error parsing bank accounts:", e);
+      }
+    }
+    return DEFAULT_BANK_ACCOUNTS;
+  });
+
+  const [selectedAccountId, setSelectedAccountId] = useState<string | 'all'>('all');
+  const [isAccountManagerOpen, setIsAccountManagerOpen] = useState<boolean>(false);
+
+  const bankAccountsRef = React.useRef(bankAccounts);
+  useEffect(() => {
+    bankAccountsRef.current = bankAccounts;
+  }, [bankAccounts]);
+
   // Track previous syncKey to avoid uploading old local state when switching user accounts
   const prevSyncKeyRef = React.useRef(syncKey);
+
+  // Trigger local storage save whenever budget, savings goal, or bank accounts change
+  useEffect(() => {
+    localStorage.setItem('kuma_bank_accounts', JSON.stringify(bankAccounts));
+    if (syncKey && prevSyncKeyRef.current === syncKey && !isInitialSync) {
+      uploadUserProfileToCloud(syncKey, { bankAccounts });
+    }
+  }, [bankAccounts]);
 
   // Trigger local storage save whenever budget or savings goal changes
   useEffect(() => {
@@ -514,6 +570,15 @@ export default function App() {
           localStorage.setItem('kuma_savings_goals', goalsJson);
         }
       }
+
+      if (profileData.bankAccounts !== undefined && Array.isArray(profileData.bankAccounts) && profileData.bankAccounts.length > 0) {
+        const bankJson = JSON.stringify(profileData.bankAccounts);
+        const currentBankJson = JSON.stringify(bankAccountsRef.current);
+        if (bankJson !== currentBankJson) {
+          setBankAccounts(profileData.bankAccounts);
+          localStorage.setItem('kuma_bank_accounts', bankJson);
+        }
+      }
     });
 
     return () => {
@@ -693,6 +758,10 @@ export default function App() {
           setSavingsGoals(downloadedProfile.savingsGoals);
           localStorage.setItem('kuma_savings_goals', JSON.stringify(downloadedProfile.savingsGoals));
         }
+        if (downloadedProfile.bankAccounts !== undefined && Array.isArray(downloadedProfile.bankAccounts)) {
+          setBankAccounts(downloadedProfile.bankAccounts);
+          localStorage.setItem('kuma_bank_accounts', JSON.stringify(downloadedProfile.bankAccounts));
+        }
       }
 
       // 2. Recover/sync transactions (Cloud data is authoritative source of truth)
@@ -722,7 +791,8 @@ export default function App() {
       incomeCategories,
       expenseCategories,
       monthlyBudgets,
-      savingsGoals
+      savingsGoals,
+      bankAccounts
     });
 
     setIsSyncing(false);
@@ -1093,6 +1163,7 @@ export default function App() {
 
   // --- Filtered and Searched list computed ---
   const filteredList = useMemo(() => {
+    const defaultAccId = bankAccounts.find(a => a.isDefault)?.id || bankAccounts[0]?.id;
     return transactions.filter(t => {
       // Month
       const matchMonth = t.date.startsWith(selectedMonth);
@@ -1103,15 +1174,19 @@ export default function App() {
       // Subcategory filter
       const matchSubCategory = selectedSubCategoryFilter === 'all' || 
         (selectedSubCategoryFilter === 'none' ? !t.subCategory : t.subCategory === selectedSubCategoryFilter);
+      // Account filter
+      const matchAccount = selectedAccountId === 'all' || 
+        t.accountId === selectedAccountId || 
+        (!t.accountId && selectedAccountId === defaultAccId);
       // Search text
       const matchSearch = searchQuery.trim() === '' || 
         t.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
         getCategoryDetailsDynamic(t.category, t.type).name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (t.subCategory && t.subCategory.toLowerCase().includes(searchQuery.toLowerCase()));
       
-      return matchMonth && matchType && matchCategory && matchSubCategory && matchSearch;
+      return matchMonth && matchType && matchCategory && matchSubCategory && matchAccount && matchSearch;
     });
-  }, [transactions, selectedMonth, filterType, selectedCategoryFilter, selectedSubCategoryFilter, searchQuery, incomeCategories, expenseCategories]);
+  }, [transactions, selectedMonth, filterType, selectedCategoryFilter, selectedSubCategoryFilter, selectedAccountId, searchQuery, incomeCategories, expenseCategories, bankAccounts]);
 
   // --- Category Specific Monthly Summary ---
   const categorySummary = useMemo(() => {
@@ -2082,6 +2157,16 @@ export default function App() {
               </div>
             </div>
 
+            {/* BANK ACCOUNTS & INITIAL BALANCE OVERVIEW SECTION */}
+            <BankAccountsOverview
+              accounts={bankAccounts}
+              transactions={transactions}
+              selectedAccountId={selectedAccountId}
+              onSelectAccount={setSelectedAccountId}
+              onOpenAccountManager={() => setIsAccountManagerOpen(true)}
+              isDark={isDark}
+            />
+
             {/* Quick stats summaries banner */}
             <div className="grid grid-cols-2 gap-2 text-center">
               <div className={`p-2.5 rounded-2xl border ${isDark ? 'bg-slate-900/40 border-slate-900' : 'bg-white border-slate-100 shadow-xs'}`}>
@@ -2801,6 +2886,16 @@ export default function App() {
                             <div className="space-y-0.5">
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 <span className="text-[9px] font-bold text-slate-400 block uppercase tracking-wider">{catDetail.name}{t.subCategory ? ` • ${t.subCategory}` : ''}</span>
+                                {(() => {
+                                  const acc = bankAccounts.find(a => a.id === t.accountId) || bankAccounts.find(a => a.isDefault);
+                                  const preset = acc ? BANK_PRESETS.find(p => p.key === acc.bankKey) : null;
+                                  const pmLabel = t.paymentMethod === 'cash' ? '💵 เงินสด' : t.paymentMethod === 'credit' ? '💳 บัตร' : t.paymentMethod === 'promptpay' ? '✨ พร้อมเพย์' : '📱 โอน';
+                                  return (
+                                    <span className="text-[8px] font-extrabold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 px-1.5 py-0.2 rounded-md flex items-center gap-0.5">
+                                      {preset ? preset.logoEmoji : '🏦'} {acc ? acc.name : 'บัญชี'} ({pmLabel})
+                                    </span>
+                                  );
+                                })()}
                                 {t.isRecurring && (
                                   <span className="text-[8px] font-extrabold bg-rose-500/10 text-rose-500 dark:bg-rose-500/20 dark:text-rose-400 px-1.5 py-0.2 rounded-md flex items-center gap-0.5">
                                     <Repeat size={8} /> ประจำเดือน
@@ -2928,6 +3023,8 @@ export default function App() {
                 defaultDate={defaultAddDate}
                 incomeCategories={incomeCategories}
                 expenseCategories={expenseCategories}
+                accounts={bankAccounts}
+                onOpenAccountManager={() => setIsAccountManagerOpen(true)}
               />
             </div>
           </div>
@@ -3934,6 +4031,19 @@ export default function App() {
         onLoginSuccess={handleLoginSuccess}
         onSignupSuccess={handleSignupSuccess}
         addToast={addToast}
+      />
+
+      {/* Account Manager Modal (เพิ่ม/แก้ไขบัญชีธนาคาร & เงินตั้งต้น) */}
+      <AccountManagerModal
+        isOpen={isAccountManagerOpen}
+        onClose={() => setIsAccountManagerOpen(false)}
+        accounts={bankAccounts}
+        transactions={transactions}
+        onSaveAccounts={(updatedAccounts) => {
+          setBankAccounts(updatedAccounts);
+          addToast('อัปเดตข้อมูลบัญชีธนาคารและเงินตั้งต้นเรียบร้อยแล้ว! 🏦✨', 'success');
+        }}
+        isDark={isDark}
       />
     </motion.div>
   );
