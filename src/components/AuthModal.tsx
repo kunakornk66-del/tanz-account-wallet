@@ -56,7 +56,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       if (activeTab === 'login') {
         const result = await loginUser(username, password);
         if (result.success && result.username && result.syncKey) {
-          addToast(result.message, 'success');
           onLoginSuccess(result.username, result.syncKey);
           setUsername('');
           setPassword('');
@@ -69,7 +68,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         // Sign Up links to the current local syncKey so local transactions aren't lost!
         const result = await signUpUser(username, password, currentSyncKey);
         if (result.success && result.username && result.syncKey) {
-          addToast(result.message, 'success');
           onSignupSuccess(result.username, result.syncKey);
           setUsername('');
           setPassword('');

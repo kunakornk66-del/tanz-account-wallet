@@ -654,15 +654,15 @@ export default function App() {
   const handleLoginSuccess = async (username: string, userSyncKey: string) => {
     setIsInitialSync(true);
     setIsSyncing(true);
-    addToast('กำลังดึงข้อมูลกระเป๋าเงินของคุณจากระบบคลาวด์... 🧸☁️', 'info');
 
-    // Clear login inputs and increment auth key
+    // Clear login inputs and close modal
     setAuthUsername('');
     setAuthPassword('');
     setShowAuthPassword(false);
+    setIsAuthModalOpen(false);
     setAuthKey(prev => prev + 1);
 
-    // Set user and sync key state immediately so real-time listeners activate
+    // Set user and sync key state immediately so UI transitions instantly and real-time listeners activate
     setLoggedInUser(username);
     localStorage.setItem('kuma_logged_in_user', username);
     
@@ -699,13 +699,12 @@ export default function App() {
       if (downloadedTx && downloadedTx.length > 0) {
         setTransactions(downloadedTx);
         localStorage.setItem('kuma_transactions', JSON.stringify(downloadedTx));
-        addToast('ดึงข้อมูลบัญชีและซิงค์ข้อมูลเสร็จเรียบร้อยแล้วค้าบ! ✨🧸', 'success');
-      } else {
-        addToast(`เข้าสู่ระบบสำเร็จ! ยินดีต้อนรับคุณ ${username} ครับ 🧸✨`, 'success');
       }
+
+      addToast(`ยินดีต้อนรับกลับมาครับคุณ ${username}! ดึงข้อมูลกระเป๋าเงินจากคลาวด์เรียบร้อยแล้ว 🧸✨`, 'success');
     } catch (error) {
       console.error("Error during login sync:", error);
-      addToast('เชื่อมต่อคลาวด์เสร็จสิ้น ข้อมูลจะถูกซิงค์ผ่านระบบอัตโนมัติครับ 🧸☁️', 'info');
+      addToast(`ยินดีต้อนรับกลับมาครับคุณ ${username}! เข้าสู่ระบบเรียบร้อยแล้ว 🧸✨`, 'success');
     } finally {
       setIsInitialSync(false);
       setIsSyncing(false);
@@ -1497,7 +1496,6 @@ export default function App() {
       if (authTab === 'login') {
         const result = await loginUser(authUsername, authPassword);
         if (result.success && result.username && result.syncKey) {
-          addToast(result.message, 'success');
           handleLoginSuccess(result.username, result.syncKey);
         } else {
           addToast(result.message || 'เข้าสู่ระบบไม่สำเร็จครับ 🥺', 'error');
@@ -1506,7 +1504,6 @@ export default function App() {
         // Sign Up
         const result = await signUpUser(authUsername, authPassword, syncKey);
         if (result.success && result.username && result.syncKey) {
-          addToast(result.message, 'success');
           handleSignupSuccess(result.username, result.syncKey);
         } else {
           addToast(result.message || 'สมัครสมาชิกไม่สำเร็จครับ 🥺', 'error');
