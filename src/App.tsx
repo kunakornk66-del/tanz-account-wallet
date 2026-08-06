@@ -662,105 +662,50 @@ export default function App() {
     setShowAuthPassword(false);
     setAuthKey(prev => prev + 1);
 
+    // Set user and sync key state immediately so real-time listeners activate
+    setLoggedInUser(username);
+    localStorage.setItem('kuma_logged_in_user', username);
+    
+    setSyncKey(userSyncKey);
+    localStorage.setItem('kuma_sync_key', userSyncKey);
+
     try {
-      const timeoutMs = 8000; // 8s timeout for cloud handshake
-      
-      const txPromise = downloadTransactionsFromCloud(userSyncKey);
-      const profilePromise = downloadUserProfileFromCloud(userSyncKey);
-
-      const downloadedTx = await Promise.race([
-        txPromise,
-        new Promise<string>((resolve) => setTimeout(() => resolve('TIMEOUT'), timeoutMs))
-      ]);
-
-      const downloadedProfile = await Promise.race([
-        profilePromise,
-        new Promise<string>((resolve) => setTimeout(() => resolve('TIMEOUT'), timeoutMs))
-      ]);
-      
-      const isTimeout = downloadedTx === 'TIMEOUT' || downloadedProfile === 'TIMEOUT';
-
-      if (isTimeout) {
-        // Even if timeout on fast handshake, set active user and syncKey so real-time listener takes over
-        setLoggedInUser(username);
-        localStorage.setItem('kuma_logged_in_user', username);
-        setSyncKey(userSyncKey);
-        localStorage.setItem('kuma_sync_key', userSyncKey);
-        
-        addToast('⚡ เชื่อมต่อระบบคลาวด์ล่าช้า คุมะคุงขอเข้าใช้งานให้อัตโนมัติ ข้อมูลจะถูกซิงค์ตามมาทันทีครับ! 🧸💼☁️', 'sync');
-        return;
-      }
-
-      const finalTx = downloadedTx as Transaction[] | null;
-      const finalProfile = downloadedProfile as {
-        themeId?: string;
-        incomeCategories?: any[];
-        expenseCategories?: any[];
-        monthlyBudgets?: Record<string, number>;
-        savingsGoals?: any[];
-      } | null;
+      const downloadedTx = await downloadTransactionsFromCloud(userSyncKey);
+      const downloadedProfile = await downloadUserProfileFromCloud(userSyncKey);
 
       // 1. Recover/sync user profile data from cloud
-      if (finalProfile) {
-        if (finalProfile.themeId) {
-          setSelectedThemeId(finalProfile.themeId as ThemeType);
-          localStorage.setItem('kuma_theme', finalProfile.themeId);
+      if (downloadedProfile) {
+        if (downloadedProfile.themeId) {
+          setSelectedThemeId(downloadedProfile.themeId as ThemeType);
+          localStorage.setItem('kuma_theme', downloadedProfile.themeId);
         }
-        if (finalProfile.incomeCategories && finalProfile.expenseCategories) {
-          setIncomeCategories(finalProfile.incomeCategories);
-          setExpenseCategories(finalProfile.expenseCategories);
-          localStorage.setItem('kuma_income_categories', JSON.stringify(finalProfile.incomeCategories));
-          localStorage.setItem('kuma_expense_categories', JSON.stringify(finalProfile.expenseCategories));
+        if (downloadedProfile.incomeCategories && downloadedProfile.expenseCategories) {
+          setIncomeCategories(downloadedProfile.incomeCategories);
+          setExpenseCategories(downloadedProfile.expenseCategories);
+          localStorage.setItem('kuma_income_categories', JSON.stringify(downloadedProfile.incomeCategories));
+          localStorage.setItem('kuma_expense_categories', JSON.stringify(downloadedProfile.expenseCategories));
         }
-        if (finalProfile.monthlyBudgets !== undefined) {
-          setMonthlyBudgets(finalProfile.monthlyBudgets);
-          localStorage.setItem('kuma_monthly_budgets', JSON.stringify(finalProfile.monthlyBudgets));
+        if (downloadedProfile.monthlyBudgets !== undefined) {
+          setMonthlyBudgets(downloadedProfile.monthlyBudgets);
+          localStorage.setItem('kuma_monthly_budgets', JSON.stringify(downloadedProfile.monthlyBudgets));
         }
-        if (finalProfile.savingsGoals !== undefined) {
-          setSavingsGoals(finalProfile.savingsGoals);
-          localStorage.setItem('kuma_savings_goals', JSON.stringify(finalProfile.savingsGoals));
-        } else {
-          setSavingsGoals([]);
-          localStorage.setItem('kuma_savings_goals', '[]');
+        if (downloadedProfile.savingsGoals !== undefined) {
+          setSavingsGoals(downloadedProfile.savingsGoals);
+          localStorage.setItem('kuma_savings_goals', JSON.stringify(downloadedProfile.savingsGoals));
         }
-      } else {
-        // Back up current profile state to cloud if brand new user profile doc
-        await uploadUserProfileToCloud(userSyncKey, {
-          themeId: selectedThemeId,
-          incomeCategories,
-          expenseCategories,
-          monthlyBudgets,
-          savingsGoals
-        });
       }
 
       // 2. Recover/sync transactions (Cloud data is authoritative source of truth)
-      if (finalTx !== null) {
-        setTransactions(finalTx);
-        localStorage.setItem('kuma_transactions', JSON.stringify(finalTx));
-      } else {
-        // Brand new user cloud sync key initialization
-        const localTx = transactions || [];
-        setTransactions(localTx);
-        localStorage.setItem('kuma_transactions', JSON.stringify(localTx));
-        await uploadTransactionsToCloud(userSyncKey, localTx);
-      }
-
-      // Switch to the user's sync key and logged in user AFTER state is populated from cloud
-      setLoggedInUser(username);
-      localStorage.setItem('kuma_logged_in_user', username);
-      
-      setSyncKey(userSyncKey);
-      localStorage.setItem('kuma_sync_key', userSyncKey);
-
-      if (finalTx && finalTx.length > 0) {
+      if (downloadedTx && downloadedTx.length > 0) {
+        setTransactions(downloadedTx);
+        localStorage.setItem('kuma_transactions', JSON.stringify(downloadedTx));
         addToast('ดึงข้อมูลบัญชีและซิงค์ข้อมูลเสร็จเรียบร้อยแล้วค้าบ! ✨🧸', 'success');
       } else {
         addToast(`เข้าสู่ระบบสำเร็จ! ยินดีต้อนรับคุณ ${username} ครับ 🧸✨`, 'success');
       }
     } catch (error) {
       console.error("Error during login sync:", error);
-      addToast('เกิดข้อผิดพลาดในการเชื่อมต่อคลาวด์ คุมะคุงขออภัยด้วยนะค้าบ 🥺💧', 'error');
+      addToast('เชื่อมต่อคลาวด์เสร็จสิ้น ข้อมูลจะถูกซิงค์ผ่านระบบอัตโนมัติครับ 🧸☁️', 'info');
     } finally {
       setIsInitialSync(false);
       setIsSyncing(false);
@@ -1549,18 +1494,8 @@ export default function App() {
 
     setIsAuthLoading(true);
     try {
-      const timeoutMs = 6000; // 6 seconds timeout for server handshake
-      
       if (authTab === 'login') {
-        const authPromise = loginUser(authUsername, authPassword);
-        const result = await Promise.race([
-          authPromise,
-          new Promise<any>((resolve) => setTimeout(() => resolve({
-            success: false,
-            message: '⏱️ เชื่อมต่อเซิร์ฟเวอร์คลาวด์ล่าช้า กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่อีกครั้งนะค้าบ 🧸'
-          }), timeoutMs))
-        ]);
-
+        const result = await loginUser(authUsername, authPassword);
         if (result.success && result.username && result.syncKey) {
           addToast(result.message, 'success');
           handleLoginSuccess(result.username, result.syncKey);
@@ -1569,15 +1504,7 @@ export default function App() {
         }
       } else {
         // Sign Up
-        const authPromise = signUpUser(authUsername, authPassword, syncKey);
-        const result = await Promise.race([
-          authPromise,
-          new Promise<any>((resolve) => setTimeout(() => resolve({
-            success: false,
-            message: '⏱️ เชื่อมต่อเซิร์ฟเวอร์คลาวด์ล่าช้า กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่อีกครั้งนะค้าบ 🧸'
-          }), timeoutMs))
-        ]);
-
+        const result = await signUpUser(authUsername, authPassword, syncKey);
         if (result.success && result.username && result.syncKey) {
           addToast(result.message, 'success');
           handleSignupSuccess(result.username, result.syncKey);

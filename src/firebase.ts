@@ -523,21 +523,39 @@ export async function loginUser(username: string, password: string): Promise<Aut
     const rawInput = username.trim().toLowerCase();
     const cleanUsername = rawInput.replace(/[@.]/g, '_');
     
-    // First try directly with document key
+    // 1. First try directly with document key
     let userRef = doc(db, 'kuma_users', cleanUsername);
     let userSnap = await getDoc(userRef);
 
-    // If not found, try searching by rawUsername or email field
+    // 2. If not found and input contains @, try searching by email field
+    if (!userSnap.exists() && rawInput.includes('@')) {
+      const qEmail = query(collection(db, 'kuma_users'), where('email', '==', rawInput));
+      const emailSnap = await getDocs(qEmail);
+      if (!emailSnap.empty) {
+        userSnap = emailSnap.docs[0];
+      }
+    }
+
+    // 3. If not found, try searching by rawUsername field
     if (!userSnap.exists()) {
-      const q = query(collection(db, 'kuma_users'), where('rawUsername', '==', rawInput));
-      const querySnapshot = await getDocs(q);
-      if (!querySnapshot.empty) {
-        userSnap = querySnapshot.docs[0];
+      const qRaw = query(collection(db, 'kuma_users'), where('rawUsername', '==', rawInput));
+      const rawSnap = await getDocs(qRaw);
+      if (!rawSnap.empty) {
+        userSnap = rawSnap.docs[0];
+      }
+    }
+
+    // 4. If not found, try searching by username field
+    if (!userSnap.exists()) {
+      const qUser = query(collection(db, 'kuma_users'), where('username', '==', cleanUsername));
+      const userFieldSnap = await getDocs(qUser);
+      if (!userFieldSnap.empty) {
+        userSnap = userFieldSnap.docs[0];
       }
     }
 
     if (!userSnap.exists()) {
-      return { success: false, message: 'ไม่เทียบบัญชีนี้ในระบบครับ กรุณาตรวจสอบ Email/Username หรือกดสมัครสมาชิกใหม่น้า 🧸' };
+      return { success: false, message: 'ไม่พบบัญชีนี้ในระบบครับ กรุณาตรวจสอบ Email/Username หรือกดสมัครสมาชิกใหม่น้า 🧸' };
     }
 
     const userData = userSnap.data();
@@ -560,7 +578,7 @@ export async function loginUser(username: string, password: string): Promise<Aut
       syncKey: userData.syncKey,
       username: userData.displayName || rawInput
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error logging in user:", error);
     return { success: false, message: 'เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์ กรุณาลองใหม่อีกครั้งครับ 🥺' };
   }
