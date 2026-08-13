@@ -1,6 +1,6 @@
 import React from 'react';
 import { BankAccount, BANK_PRESETS, Transaction } from '../types';
-import { Landmark, Plus, Edit2, ShieldCheck, ChevronRight, Wallet, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { Landmark, Plus, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 
 interface BankAccountsOverviewProps {
   accounts: BankAccount[];
@@ -20,39 +20,48 @@ export const BankAccountsOverview: React.FC<BankAccountsOverviewProps> = ({
   isDark
 }) => {
   // Helper to calculate total starting balance across all accounts
-  const totalInitialBalance = accounts.reduce((sum, acc) => sum + (acc.initialBalance || 0), 0);
+  const parseNum = (val: any) => {
+    if (val === undefined || val === null) return 0;
+    if (typeof val === 'number') return isNaN(val) ? 0 : val;
+    const cleaned = String(val).replace(/,/g, '').trim();
+    const num = parseFloat(cleaned);
+    return isNaN(num) ? 0 : num;
+  };
+
+  const totalInitialBalance = accounts.reduce((sum, acc) => sum + parseNum(acc.initialBalance), 0);
 
   // Helper to calculate balance per account
   const getAccountMetrics = (accId: string, initialBal: number) => {
     let income = 0;
     let expense = 0;
     const defaultAccId = accounts.find(a => a.isDefault)?.id || accounts[0]?.id;
+    const baseInitial = parseNum(initialBal);
 
     transactions.forEach((tx) => {
       const isSourceMatch = tx.accountId === accId || (!tx.accountId && defaultAccId === accId);
       const isTargetMatch = tx.toAccountId === accId;
+      const amt = parseNum(tx.amount);
 
       if (tx.type === 'income') {
-        if (isSourceMatch) income += tx.amount;
+        if (isSourceMatch) income += amt;
       } else if (tx.type === 'expense') {
-        if (isSourceMatch) expense += tx.amount;
-        if (isTargetMatch) income += tx.amount;
+        if (isSourceMatch) expense += amt;
       } else if (tx.type === 'transfer') {
-        if (isSourceMatch) expense += tx.amount;
-        if (isTargetMatch) income += tx.amount;
+        if (isSourceMatch) expense += amt;
+        if (isTargetMatch) income += amt;
       }
     });
 
     return {
       income,
       expense,
-      netBalance: initialBal + income - expense
+      netBalance: baseInitial + income - expense
     };
   };
 
   // Portfolio-wide totals
-  const totalIncomeAll = transactions.reduce((sum, tx) => tx.type === 'income' ? sum + tx.amount : sum, 0);
-  const totalExpenseAll = transactions.reduce((sum, tx) => tx.type === 'expense' ? sum + tx.amount : sum, 0);
+  const totalIncomeAll = transactions.reduce((sum, tx) => tx.type === 'income' ? sum + parseNum(tx.amount) : sum, 0);
+  const totalExpenseAll = transactions.reduce((sum, tx) => tx.type === 'expense' ? sum + parseNum(tx.amount) : sum, 0);
   const totalNetAll = totalInitialBalance + totalIncomeAll - totalExpenseAll;
 
   return (
@@ -110,22 +119,41 @@ export const BankAccountsOverview: React.FC<BankAccountsOverviewProps> = ({
             )}
           </div>
 
-          <div className="space-y-1">
-            <span className={`text-[10px] font-medium block ${selectedAccountId === 'all' ? 'text-emerald-100' : 'text-slate-400'}`}>
-              เงินคงเหลือรวมสุทธิ
-            </span>
-            <div className={`text-xl font-black ${selectedAccountId === 'all' ? 'text-white' : totalNetAll >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-              ฿{totalNetAll.toLocaleString('th-TH', { minimumFractionDigits: 0 })}
+          <div className="space-y-0.5">
+            <div className="flex items-center justify-between">
+              <span className={`text-[10px] font-bold ${selectedAccountId === 'all' ? 'text-emerald-100' : 'text-slate-400'}`}>
+                เงินตั้งต้นรวม:
+              </span>
+              <span className={`text-[11px] font-bold ${selectedAccountId === 'all' ? 'text-white' : 'text-slate-600 dark:text-slate-300'}`}>
+                ฿{totalInitialBalance.toLocaleString()}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className={`text-[10px] font-bold ${selectedAccountId === 'all' ? 'text-emerald-100' : 'text-slate-400'}`}>
+                ยอดคงเหลือสุทธิ:
+              </span>
+              <div className={`text-base font-black ${selectedAccountId === 'all' ? 'text-white' : totalNetAll >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                ฿{totalNetAll.toLocaleString('th-TH', { minimumFractionDigits: 0 })}
+              </div>
             </div>
           </div>
 
-          <div className={`mt-2.5 pt-2 border-t flex items-center justify-between text-[10px] font-semibold ${
-            selectedAccountId === 'all' ? 'border-white/20 text-emerald-100' : 'border-slate-100 dark:border-slate-800 text-slate-400'
+          {/* Mini Flow Indicators */}
+          <div className={`mt-2 pt-2 border-t grid grid-cols-2 gap-1 text-[9px] font-bold ${
+            selectedAccountId === 'all'
+              ? 'border-white/20 text-emerald-100'
+              : isDark
+                ? 'border-slate-800 text-slate-400'
+                : 'border-slate-100 text-slate-500'
           }`}>
-            <span>เงินตั้งต้นรวม: ฿{totalInitialBalance.toLocaleString()}</span>
-            <span className="flex items-center gap-0.5 font-bold">
-              คลิกเพื่อดูทั้งหมด <ChevronRight size={10} />
-            </span>
+            <div className="flex items-center gap-0.5 text-emerald-400">
+              <ArrowDownLeft size={10} />
+              <span>+฿{totalIncomeAll.toLocaleString()}</span>
+            </div>
+            <div className="flex items-center gap-0.5 text-rose-300 justify-end">
+              <ArrowUpRight size={10} />
+              <span>-฿{totalExpenseAll.toLocaleString()}</span>
+            </div>
           </div>
         </div>
 

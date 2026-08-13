@@ -223,7 +223,8 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const numAmount = parseFloat(amount);
+    const cleanedAmount = String(amount || '').replace(/,/g, '').trim();
+    const numAmount = parseFloat(cleanedAmount);
     if (isNaN(numAmount) || numAmount <= 0) {
       if (addToast) {
         addToast('กรุณากรอกจำนวนเงินที่ถูกต้อง (มากกว่า 0) 🥺', 'error');
@@ -292,7 +293,8 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
   // Quick cash amount addition
   const quickAmounts = [20, 50, 100, 500, 1000];
   const handleQuickAmount = (val: number) => {
-    const current = parseFloat(amount) || 0;
+    const cleaned = String(amount || '').replace(/,/g, '').trim();
+    const current = parseFloat(cleaned) || 0;
     setAmount((current + val).toString());
   };
 

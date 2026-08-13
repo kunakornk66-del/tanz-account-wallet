@@ -85,11 +85,19 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
     }
   };
 
+  const cleanAndParseFloat = (val: string | number | undefined | null): number => {
+    if (val === undefined || val === null) return 0;
+    if (typeof val === 'number') return isNaN(val) ? 0 : val;
+    const cleaned = String(val).replace(/,/g, '').trim();
+    const num = parseFloat(cleaned);
+    return isNaN(num) ? 0 : num;
+  };
+
   const handleCreateAccount = (e: React.FormEvent) => {
     e.preventDefault();
     const preset = BANK_PRESETS.find(p => p.key === bankKey);
     const finalName = accountName.trim() || preset?.name || 'บัญชีธนาคาร';
-    const initVal = parseFloat(initialBalance) || 0;
+    const initVal = cleanAndParseFloat(initialBalance);
 
     const newAccData: Omit<BankAccount, 'id'> = {
       name: finalName,
@@ -121,11 +129,7 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
   };
 
   const handleSaveInitialBalance = (id: string) => {
-    const inputVal = parseFloat(editingInitialValue);
-    if (isNaN(inputVal)) {
-      if (addToast) addToast('กรุณากรอกจำนวนเงินให้ถูกต้องครับ 🥺', 'error');
-      return;
-    }
+    const inputVal = cleanAndParseFloat(editingInitialValue);
 
     let finalInitialBalance = inputVal;
 
@@ -134,10 +138,17 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
       let income = 0;
       let expense = 0;
       (transactions || []).forEach((tx) => {
-        const isMatch = tx.accountId === id || (!tx.accountId && defaultAcc?.id === id);
-        if (isMatch) {
-          if (tx.type === 'income') income += tx.amount;
-          if (tx.type === 'expense') expense += tx.amount;
+        const isSourceMatch = tx.accountId === id || (!tx.accountId && defaultAcc?.id === id);
+        const isTargetMatch = tx.toAccountId === id;
+        const amt = cleanAndParseFloat(tx.amount);
+
+        if (tx.type === 'income') {
+          if (isSourceMatch) income += amt;
+        } else if (tx.type === 'expense') {
+          if (isSourceMatch) expense += amt;
+        } else if (tx.type === 'transfer') {
+          if (isSourceMatch) expense += amt;
+          if (isTargetMatch) income += amt;
         }
       });
       // Target Current = Initial + Income - Expense

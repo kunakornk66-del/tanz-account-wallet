@@ -253,25 +253,25 @@ export default function App() {
   // Trigger local storage save whenever budget, savings goal, or bank accounts change
   useEffect(() => {
     localStorage.setItem('kuma_bank_accounts', JSON.stringify(bankAccounts));
-    if (syncKey && prevSyncKeyRef.current === syncKey && !isInitialSync) {
+    if (syncKey && !isInitialSync) {
       uploadUserProfileToCloud(syncKey, { bankAccounts });
     }
-  }, [bankAccounts]);
+  }, [bankAccounts, syncKey, isInitialSync]);
 
   // Trigger local storage save whenever budget or savings goal changes
   useEffect(() => {
     localStorage.setItem('kuma_monthly_budgets', JSON.stringify(monthlyBudgets));
-    if (syncKey && prevSyncKeyRef.current === syncKey && !isInitialSync) {
+    if (syncKey && !isInitialSync) {
       uploadUserProfileToCloud(syncKey, { monthlyBudgets });
     }
-  }, [monthlyBudgets]);
+  }, [monthlyBudgets, syncKey, isInitialSync]);
 
   useEffect(() => {
     localStorage.setItem('kuma_savings_goals', JSON.stringify(savingsGoals));
-    if (syncKey && prevSyncKeyRef.current === syncKey && !isInitialSync) {
+    if (syncKey && !isInitialSync) {
       uploadUserProfileToCloud(syncKey, { savingsGoals });
     }
-  }, [savingsGoals]);
+  }, [savingsGoals, syncKey, isInitialSync]);
 
   useEffect(() => {
     prevSyncKeyRef.current = syncKey;
@@ -1072,7 +1072,8 @@ export default function App() {
       incomeCategories,
       expenseCategories,
       monthlyBudgets,
-      savingsGoals
+      savingsGoals,
+      bankAccounts
     });
     setIsSyncing(false);
     if (successTx && successProfile) {
@@ -1142,6 +1143,10 @@ export default function App() {
           } else {
             setSavingsGoals([]);
             localStorage.setItem('kuma_savings_goals', '[]');
+          }
+          if (fetchedProfile.bankAccounts !== undefined && Array.isArray(fetchedProfile.bankAccounts) && fetchedProfile.bankAccounts.length > 0) {
+            setBankAccounts(fetchedProfile.bankAccounts);
+            localStorage.setItem('kuma_bank_accounts', JSON.stringify(fetchedProfile.bankAccounts));
           }
         }
         
@@ -1286,8 +1291,58 @@ export default function App() {
     };
   }, [transactions, selectedMonth, selectedCategoryFilter, selectedSubCategoryFilter, incomeCategories, expenseCategories]);
 
+  // --- Total Net Balance across all bank accounts and cash ---
+  const totalNetBalance = useMemo(() => {
+    const parseNum = (val: any) => {
+      if (val === undefined || val === null) return 0;
+      if (typeof val === 'number') return isNaN(val) ? 0 : val;
+      const cleaned = String(val).replace(/,/g, '').trim();
+      const num = parseFloat(cleaned);
+      return isNaN(num) ? 0 : num;
+    };
+
+    const defaultAccId = bankAccounts.find(a => a.isDefault)?.id || bankAccounts[0]?.id;
+
+    if (selectedAccountId === 'all') {
+      const initialSum = bankAccounts.reduce((sum, acc) => sum + parseNum(acc.initialBalance), 0);
+      const totalIncome = transactions.reduce((sum, tx) => tx.type === 'income' ? sum + parseNum(tx.amount) : sum, 0);
+      const totalExpense = transactions.reduce((sum, tx) => tx.type === 'expense' ? sum + parseNum(tx.amount) : sum, 0);
+      return initialSum + totalIncome - totalExpense;
+    } else {
+      const acc = bankAccounts.find(a => a.id === selectedAccountId);
+      const initialBal = parseNum(acc?.initialBalance);
+      let inc = 0;
+      let exp = 0;
+
+      transactions.forEach((tx) => {
+        const isSourceMatch = tx.accountId === selectedAccountId || (!tx.accountId && selectedAccountId === defaultAccId);
+        const isTargetMatch = tx.toAccountId === selectedAccountId;
+        const amt = parseNum(tx.amount);
+
+        if (tx.type === 'income') {
+          if (isSourceMatch) inc += amt;
+        } else if (tx.type === 'expense') {
+          if (isSourceMatch) exp += amt;
+        } else if (tx.type === 'transfer') {
+          if (isSourceMatch) exp += amt;
+          if (isTargetMatch) inc += amt;
+        }
+      });
+
+      return initialBal + inc - exp;
+    }
+  }, [bankAccounts, transactions, selectedAccountId]);
+
   // --- Aggregate totals for display ---
   const summaryTotals = useMemo(() => {
+    const parseNum = (val: any) => {
+      if (val === undefined || val === null) return 0;
+      if (typeof val === 'number') return isNaN(val) ? 0 : val;
+      const cleaned = String(val).replace(/,/g, '').trim();
+      const num = parseFloat(cleaned);
+      return isNaN(num) ? 0 : num;
+    };
+
     let income = 0;
     let expense = 0;
     const defaultAccId = bankAccounts.find(a => a.isDefault)?.id || bankAccounts[0]?.id;
@@ -1295,20 +1350,20 @@ export default function App() {
     // Calculate for selected month
     const monthlyItems = transactions.filter(t => t.date.startsWith(selectedMonth));
     monthlyItems.forEach(t => {
+      const amt = parseNum(t.amount);
       if (selectedAccountId === 'all') {
-        if (t.type === 'income') income += t.amount;
-        else if (t.type === 'expense') expense += t.amount;
+        if (t.type === 'income') income += amt;
+        else if (t.type === 'expense') expense += amt;
       } else {
         const isSourceMatch = t.accountId === selectedAccountId || (!t.accountId && selectedAccountId === defaultAccId);
         const isTargetMatch = t.toAccountId === selectedAccountId;
 
-        if (t.type === 'income' && isSourceMatch) income += t.amount;
+        if (t.type === 'income' && isSourceMatch) income += amt;
         else if (t.type === 'expense') {
-          if (isSourceMatch) expense += t.amount;
-          if (isTargetMatch) income += t.amount;
+          if (isSourceMatch) expense += amt;
         } else if (t.type === 'transfer') {
-          if (isSourceMatch) expense += t.amount;
-          if (isTargetMatch) income += t.amount;
+          if (isSourceMatch) expense += amt;
+          if (isTargetMatch) income += amt;
         }
       }
     });
@@ -1316,9 +1371,9 @@ export default function App() {
     return {
       income,
       expense,
-      balance: income - expense
+      balance: totalNetBalance
     };
-  }, [transactions, selectedMonth, selectedAccountId, bankAccounts]);
+  }, [transactions, selectedMonth, selectedAccountId, bankAccounts, totalNetBalance]);
 
   // --- Kuma Financial Insights Memo ---
   const kumaInsights = useMemo(() => {
@@ -2133,9 +2188,13 @@ export default function App() {
 
               {/* Main Savings Balance */}
               <div className="text-center py-1 relative z-10">
-                <span className="text-[10px] font-bold text-white/75 tracking-wider uppercase">ยอดคงเหลือประจำเดือน</span>
+                <span className="text-[10px] font-bold text-white/80 tracking-wider uppercase">
+                  {selectedAccountId === 'all'
+                    ? 'ยอดเงินคงเหลือสุทธิ (รวมทุกบัญชี & เงินสด)'
+                    : `ยอดเงินคงเหลือสุทธิ (${bankAccounts.find(a => a.id === selectedAccountId)?.name || 'บัญชีนี้'})`}
+                </span>
                 <h2 className="text-3xl font-extrabold tracking-tight mt-0.5">
-                  ฿{summaryTotals.balance.toLocaleString(undefined, {minimumFractionDigits: 2})}
+                  ฿{summaryTotals.balance.toLocaleString('th-TH', { minimumFractionDigits: 2 })}
                 </h2>
               </div>
 
@@ -4128,6 +4187,9 @@ export default function App() {
         transactions={transactions}
         onSaveAccounts={(updatedAccounts) => {
           setBankAccounts(updatedAccounts);
+          if (syncKey) {
+            uploadUserProfileToCloud(syncKey, { bankAccounts: updatedAccounts });
+          }
           addToast('อัปเดตข้อมูลบัญชีธนาคารเรียบร้อยแล้ว! 🏦✨', 'success');
         }}
         isDark={isDark}
