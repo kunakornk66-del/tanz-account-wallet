@@ -431,7 +431,11 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
                             value={editDetailsName}
                             onChange={(e) => setEditDetailsName(e.target.value)}
                             placeholder="ชื่อบัญชี"
-                            className="w-full px-2.5 py-1.5 text-xs font-bold rounded-lg border bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:border-emerald-500 focus:outline-none"
+                            className={`w-full px-2.5 py-1.5 text-xs font-bold rounded-lg border focus:border-emerald-500 focus:outline-none ${
+                              isDark 
+                                ? 'bg-slate-900 border-slate-700 text-white placeholder-slate-500' 
+                                : 'bg-white border-slate-300 text-slate-800 placeholder-slate-400'
+                            }`}
                           />
                         </div>
                         <div>
@@ -443,7 +447,11 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
                             value={editDetailsNumber}
                             onChange={(e) => setEditDetailsNumber(e.target.value)}
                             placeholder="xxx-x-xxxxx-x"
-                            className="w-full px-2.5 py-1.5 text-xs font-bold rounded-lg border bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 focus:border-emerald-500 focus:outline-none"
+                            className={`w-full px-2.5 py-1.5 text-xs font-bold rounded-lg border focus:border-emerald-500 focus:outline-none ${
+                              isDark 
+                                ? 'bg-slate-900 border-slate-700 text-white placeholder-slate-500' 
+                                : 'bg-white border-slate-300 text-slate-800 placeholder-slate-400'
+                            }`}
                           />
                         </div>
                       </div>
@@ -586,7 +594,11 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
                             step="any"
                             value={editingInitialValue}
                             onChange={(e) => setEditingInitialValue(e.target.value)}
-                            className="w-full pl-6 pr-2 py-1.5 text-xs font-extrabold rounded-lg border bg-white dark:bg-slate-900 border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            className={`w-full pl-6 pr-2 py-1.5 text-xs font-extrabold rounded-lg border focus:outline-none focus:ring-1 focus:ring-emerald-500 ${
+                              isDark
+                                ? 'bg-slate-900 border-emerald-500 text-white placeholder-slate-500'
+                                : 'bg-white border-emerald-500 text-slate-800 placeholder-slate-400'
+                            }`}
                             placeholder="0.00"
                             autoFocus
                           />
@@ -639,8 +651,8 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
                     placeholder="🔍 พิมพ์ค้นหาธนาคาร (เช่น กสิกร, SCB, ธอส., TrueMoney...)"
                     className={`w-full px-3 py-1.5 text-xs font-bold rounded-xl border focus:outline-none ${
                       isDark 
-                        ? 'bg-slate-900 border-slate-700 text-white focus:border-emerald-500' 
-                        : 'bg-white border-slate-200 text-slate-800 focus:border-emerald-500'
+                        ? 'bg-slate-900 border-slate-700 text-white placeholder-slate-500 focus:border-emerald-500' 
+                        : 'bg-white border-slate-200 text-slate-800 placeholder-slate-400 focus:border-emerald-500'
                     }`}
                   />
                 </div>
@@ -684,7 +696,7 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
                   onChange={(e) => setAccountName(e.target.value)}
                   placeholder="เช่น บัญชีออมทรัพย์ กสิกร"
                   className={`w-full px-3 py-2 text-xs font-bold rounded-xl border focus:outline-none ${
-                    isDark ? 'bg-slate-900 border-slate-700 text-white focus:border-emerald-500' : 'bg-white border-slate-200 text-slate-800 focus:border-emerald-500'
+                    isDark ? 'bg-slate-900 border-slate-700 text-white placeholder-slate-500 focus:border-emerald-500' : 'bg-white border-slate-200 text-slate-800 placeholder-slate-400 focus:border-emerald-500'
                   }`}
                   required
                 />
@@ -702,7 +714,7 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
                     onChange={(e) => setAccountNumber(e.target.value)}
                     placeholder="xxx-x-xxxxx-x"
                     className={`w-full px-3 py-2 text-xs font-bold rounded-xl border focus:outline-none ${
-                      isDark ? 'bg-slate-900 border-slate-700 text-white focus:border-emerald-500' : 'bg-white border-slate-200 text-slate-800 focus:border-emerald-500'
+                      isDark ? 'bg-slate-900 border-slate-700 text-white placeholder-slate-500 focus:border-emerald-500' : 'bg-white border-slate-200 text-slate-800 placeholder-slate-400 focus:border-emerald-500'
                     }`}
                   />
                 </div>
@@ -717,7 +729,7 @@ export const AccountManagerModal: React.FC<AccountManagerModalProps> = ({
                     onChange={(e) => setInitialBalance(e.target.value)}
                     placeholder="0.00"
                     className={`w-full px-3 py-2 text-xs font-bold rounded-xl border focus:outline-none ${
-                      isDark ? 'bg-slate-900 border-slate-700 text-white focus:border-emerald-500' : 'bg-white border-slate-200 text-slate-800 focus:border-emerald-500'
+                      isDark ? 'bg-slate-900 border-slate-700 text-white placeholder-slate-500 focus:border-emerald-500' : 'bg-white border-slate-200 text-slate-800 placeholder-slate-400 focus:border-emerald-500'
                     }`}
                   />
                 </div>
