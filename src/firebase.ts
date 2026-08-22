@@ -164,11 +164,21 @@ export async function deleteTransactionFromCloud(syncKey: string, txId: string):
 }
 
 // Upload transactions to Cloud under a specific Sync Key in safe chunks
-export async function uploadTransactionsToCloud(syncKey: string, transactions: any[]): Promise<boolean> {
+export async function uploadTransactionsToCloud(syncKey: string, transactions: any[], allowEmptyDelete: boolean = false): Promise<boolean> {
   try {
-    if (!syncKey) return false;
+    if (!syncKey || !syncKey.trim()) return false;
     const key = syncKey.toUpperCase();
     
+    const transCollectionRef = collection(db, 'sync_profiles', key, 'transactions');
+    const existingDocs = await getDocs(transCollectionRef);
+    
+    // Safety guard: If transactions array is empty and there are existing documents on the cloud,
+    // do NOT wipe them out unless allowEmptyDelete is explicitly requested (e.g., from deliberate Reset All Data).
+    if (transactions.length === 0 && existingDocs.size > 0 && !allowEmptyDelete) {
+      console.warn("Skipped wiping cloud transactions because allowEmptyDelete is false.");
+      return true;
+    }
+
     // Write profile document metadata
     const profileRef = doc(db, 'sync_profiles', key);
     await setDoc(profileRef, {
@@ -176,9 +186,6 @@ export async function uploadTransactionsToCloud(syncKey: string, transactions: a
       lastSyncedAt: Date.now(),
       transactionCount: transactions.length
     }, { merge: true });
-
-    const transCollectionRef = collection(db, 'sync_profiles', key, 'transactions');
-    const existingDocs = await getDocs(transCollectionRef);
     
     const currentTxIds = new Set(transactions.map(t => t.id));
     
@@ -473,17 +480,22 @@ export async function signUpUser(username: string, password: string, syncKey: st
       return { success: false, message: `ขออภัยครับ บัญชีหรืออีเมล "${username}" นี้มีในระบบแล้ว สามารถกดเข้าสู่ระบบได้เลยครับ 🧸` };
     }
 
-    // Check if the current syncKey is already owned/claimed by another user
-    const q = query(collection(db, 'kuma_users'), where('syncKey', '==', syncKey.toUpperCase()));
-    const querySnapshot = await getDocs(q);
-    
-    let finalSyncKey = syncKey.toUpperCase();
+    // Ensure syncKey is valid, non-empty, and starts with KUMA-
+    let finalSyncKey = (syncKey || '').trim().toUpperCase();
     let isNewKey = false;
-    
-    if (!querySnapshot.empty) {
-      // This sync key is already registered to someone else! We must generate a brand new unique key for safety.
+
+    if (!finalSyncKey || !finalSyncKey.startsWith('KUMA-') || finalSyncKey.length < 8) {
       finalSyncKey = generateSyncKey();
       isNewKey = true;
+    } else {
+      // Check if the current syncKey is already owned/claimed by another user
+      const q = query(collection(db, 'kuma_users'), where('syncKey', '==', finalSyncKey));
+      const querySnapshot = await getDocs(q);
+      if (!querySnapshot.empty) {
+        // This sync key is already registered to someone else! Generate a brand new unique key.
+        finalSyncKey = generateSyncKey();
+        isNewKey = true;
+      }
     }
 
     // Save shopEmail in localStorage for quick reference
@@ -572,6 +584,13 @@ export async function loginUser(username: string, password: string): Promise<Aut
       return { success: false, message: 'รหัสผ่านไม่ถูกต้องครับ กรุณาลองใหม่อีกครั้งนะคุมะ 🥺🔑' };
     }
 
+    // Ensure user has a valid syncKey; if missing or invalid, generate and update
+    let userSyncKey = (userData.syncKey || '').trim().toUpperCase();
+    if (!userSyncKey || !userSyncKey.startsWith('KUMA-') || userSyncKey.length < 8) {
+      userSyncKey = generateSyncKey();
+      await setDoc(userSnap.ref, { syncKey: userSyncKey }, { merge: true });
+    }
+
     // Save shopEmail in localStorage if email exists
     if (userData.email || rawInput.includes('@')) {
       try {
@@ -584,12 +603,55 @@ export async function loginUser(username: string, password: string): Promise<Aut
     return {
       success: true,
       message: `ยินดีต้อนรับกลับมาครับคุณ ${userData.displayName || rawInput}! 🧸✨`,
-      syncKey: userData.syncKey,
+      syncKey: userSyncKey,
       username: userData.displayName || rawInput
     };
   } catch (error: any) {
     console.error("Error logging in user:", error);
     return { success: false, message: 'เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์ กรุณาลองใหม่อีกครั้งครับ 🥺' };
+  }
+}
+
+/**
+ * Recovers or fetches a user's registered syncKey from Firestore by username/email.
+ */
+export async function getUserSyncKey(usernameOrEmail: string): Promise<string | null> {
+  try {
+    if (!usernameOrEmail) return null;
+    const rawInput = usernameOrEmail.trim().toLowerCase();
+    const cleanUsername = rawInput.replace(/[@.]/g, '_');
+    
+    // 1. Direct document key
+    let userRef = doc(db, 'kuma_users', cleanUsername);
+    let userSnap = await getDoc(userRef);
+
+    // 2. Query by email
+    if (!userSnap.exists() && rawInput.includes('@')) {
+      const qEmail = query(collection(db, 'kuma_users'), where('email', '==', rawInput));
+      const emailSnap = await getDocs(qEmail);
+      if (!emailSnap.empty) userSnap = emailSnap.docs[0];
+    }
+
+    // 3. Query by rawUsername
+    if (!userSnap.exists()) {
+      const qRaw = query(collection(db, 'kuma_users'), where('rawUsername', '==', rawInput));
+      const rawSnap = await getDocs(qRaw);
+      if (!rawSnap.empty) userSnap = rawSnap.docs[0];
+    }
+
+    if (userSnap.exists()) {
+      const data = userSnap.data();
+      let key = (data.syncKey || '').trim().toUpperCase();
+      if (!key || !key.startsWith('KUMA-')) {
+        key = generateSyncKey();
+        await setDoc(userSnap.ref, { syncKey: key }, { merge: true });
+      }
+      return key;
+    }
+    return null;
+  } catch (err) {
+    console.error("Error fetching user syncKey:", err);
+    return null;
   }
 }
 
@@ -619,23 +681,29 @@ export async function loginWithGoogle(syncKey: string): Promise<AuthResult> {
     const userRef = doc(db, 'kuma_users', cleanUsername);
     const userSnap = await getDoc(userRef);
 
-    let finalSyncKey = syncKey.toUpperCase();
+    let finalSyncKey = (syncKey || '').trim().toUpperCase();
 
     if (userSnap.exists()) {
       const userData = userSnap.data();
-      finalSyncKey = userData.syncKey;
-    } else {
-      const q = query(collection(db, 'kuma_users'), where('syncKey', '==', syncKey.toUpperCase()));
-      const querySnapshot = await getDocs(q);
-      
-      let isNewKey = false;
-      if (!querySnapshot.empty) {
+      finalSyncKey = (userData.syncKey || '').trim().toUpperCase();
+      if (!finalSyncKey || !finalSyncKey.startsWith('KUMA-')) {
         finalSyncKey = generateSyncKey();
-        isNewKey = true;
+        await setDoc(userRef, { syncKey: finalSyncKey }, { merge: true });
+      }
+    } else {
+      if (!finalSyncKey || !finalSyncKey.startsWith('KUMA-') || finalSyncKey.length < 8) {
+        finalSyncKey = generateSyncKey();
+      } else {
+        const q = query(collection(db, 'kuma_users'), where('syncKey', '==', finalSyncKey));
+        const querySnapshot = await getDocs(q);
+        if (!querySnapshot.empty) {
+          finalSyncKey = generateSyncKey();
+        }
       }
 
       await setDoc(userRef, {
         username: cleanUsername,
+        rawUsername: email,
         displayName: user.displayName || email.split('@')[0],
         syncKey: finalSyncKey,
         email: email,

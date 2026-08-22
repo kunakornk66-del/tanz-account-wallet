@@ -55,7 +55,8 @@ import {
   subscribeToTransactions,
   subscribeToProfile,
   saveTransactionToCloud,
-  deleteTransactionFromCloud
+  deleteTransactionFromCloud,
+  getUserSyncKey
 } from './firebase';
 import { 
   Wallet, 
@@ -93,8 +94,11 @@ import {
   List,
   Smartphone,
   Lightbulb,
-  Repeat
+  Repeat,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
+import { soundFx } from './sound';
 
 // No initial transactions - start completely fresh
 const INITIAL_TRANSACTIONS: Transaction[] = [];
@@ -400,13 +404,40 @@ export default function App() {
     }
   }, [mascotReaction]);
 
+  // Sound Effects State
+  const [isSoundOn, setIsSoundOn] = useState<boolean>(() => soundFx.getSoundEnabled());
+
+  const handleToggleSound = () => {
+    const next = soundFx.toggleSound();
+    setIsSoundOn(next);
+    addToast(next ? 'เปิดเสียงเอฟเฟกต์แล้วครับ 🔔✨' : 'ปิดเสียงเอฟเฟกต์แล้วครับ 🔕', 'info');
+  };
+
   // Mascot trigger reaction helper
-  const triggerMascotReaction = (reaction: 'happy' | 'celebrate' | 'proud' | 'shocked', message: string) => {
+  const triggerMascotReaction = (
+    reaction: 'happy' | 'celebrate' | 'proud' | 'shocked', 
+    message: string,
+    soundOverride?: 'celebrate' | 'happy' | 'proud' | 'warning' | 'tap'
+  ) => {
     setMascotReaction(reaction);
     setMascotMessage(message);
     
-    // Confetti on celebrate or happy
-    if (reaction === 'celebrate' || reaction === 'happy') {
+    // Play subtle, cute Web Audio API sound effect
+    const chosenSound = soundOverride || (reaction === 'shocked' ? 'warning' : reaction);
+    if (chosenSound === 'celebrate') {
+      soundFx.playCelebrate();
+    } else if (chosenSound === 'happy') {
+      soundFx.playHappy();
+    } else if (chosenSound === 'proud') {
+      soundFx.playProud();
+    } else if (chosenSound === 'warning') {
+      soundFx.playWarning();
+    } else if (chosenSound === 'tap') {
+      soundFx.playTap();
+    }
+
+    // Confetti on celebrate
+    if (reaction === 'celebrate') {
       confetti({
         particleCount: 100,
         spread: 75,
@@ -453,24 +484,56 @@ export default function App() {
 
     // 2. Sync Key & Cloud sync values
     let key = localStorage.getItem('kuma_sync_key') || '';
-    if (!key) {
+    if (!key || !key.startsWith('KUMA-')) {
       key = generateSyncKey();
       localStorage.setItem('kuma_sync_key', key);
-      addToast(`🎉 ยินดีต้อนรับ! สร้างรหัสสำรองข้อมูลส่วนตัวให้คุณเรียบร้อยครับ: ${key}`, 'sync');
     }
     setSyncKey(key);
 
     const storedLastSync = localStorage.getItem('kuma_last_synced') || '0';
     setLastSyncedAt(parseInt(storedLastSync));
 
-    // 3. Transactions
+    // 3. Transactions & Backup Recovery
     const storedTx = localStorage.getItem('kuma_transactions');
+    let loadedTransactions: Transaction[] | null = null;
+
     if (storedTx) {
-      setTransactions(JSON.parse(storedTx));
+      try {
+        const parsed = JSON.parse(storedTx);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          loadedTransactions = parsed;
+        }
+      } catch (e) {
+        console.warn("Error parsing stored transactions:", e);
+      }
+    }
+
+    // If main storage was empty, check secondary backup snapshot
+    if (!loadedTransactions || loadedTransactions.length === 0) {
+      try {
+        const backupRaw = localStorage.getItem('kuma_transactions_backup');
+        if (backupRaw) {
+          const b = JSON.parse(backupRaw);
+          if (b?.data && Array.isArray(b.data) && b.data.length > 0) {
+            loadedTransactions = b.data;
+            localStorage.setItem('kuma_transactions', JSON.stringify(b.data));
+          }
+        }
+      } catch (e) {
+        console.warn("Error reading backup transactions:", e);
+      }
+    }
+
+    if (loadedTransactions && loadedTransactions.length > 0) {
+      setTransactions(loadedTransactions);
     } else {
-      // First load, seed cute data
+      // First load, seed initial data
       setTransactions(INITIAL_TRANSACTIONS);
       localStorage.setItem('kuma_transactions', JSON.stringify(INITIAL_TRANSACTIONS));
+      localStorage.setItem('kuma_transactions_backup', JSON.stringify({
+        savedAt: Date.now(),
+        data: INITIAL_TRANSACTIONS
+      }));
     }
 
     // 3.5. Dynamic Categories
@@ -492,10 +555,17 @@ export default function App() {
       setReminderSettings(JSON.parse(storedReminders));
     }
 
-    // 5. Logged In User
+    // 5. Logged In User & Key Recovery
     const storedUser = localStorage.getItem('kuma_logged_in_user');
     if (storedUser) {
       setLoggedInUser(storedUser);
+      // Verify or recover user's active cloud syncKey in background
+      getUserSyncKey(storedUser).then(recoveredKey => {
+        if (recoveredKey && recoveredKey !== key) {
+          setSyncKey(recoveredKey);
+          localStorage.setItem('kuma_sync_key', recoveredKey);
+        }
+      }).catch(err => console.warn("Failed to check user syncKey:", err));
     }
   }, []);
 
@@ -532,8 +602,25 @@ export default function App() {
       const currentJson = JSON.stringify(transactionsRef.current);
 
       if (cloudJson !== currentJson) {
+        // Safety guard: If Cloud snapshot returned empty array, but local device has existing user transactions,
+        // do NOT wipe the user's data! Instead, push local transactions to the cloud to restore and backup.
+        if (cloudTxList.length === 0 && transactionsRef.current && transactionsRef.current.length > 0) {
+          uploadTransactionsToCloud(syncKey, transactionsRef.current);
+          return;
+        }
+
         setTransactions(cloudTxList);
-        localStorage.setItem('kuma_transactions', cloudJson);
+        try {
+          localStorage.setItem('kuma_transactions', cloudJson);
+          if (cloudTxList.length > 0) {
+            localStorage.setItem('kuma_transactions_backup', JSON.stringify({
+              savedAt: Date.now(),
+              data: cloudTxList
+            }));
+          }
+        } catch (err) {
+          console.warn("LocalStorage cache error:", err);
+        }
         const now = Date.now();
         setLastSyncedAt(now);
         localStorage.setItem('kuma_last_synced', now.toString());
@@ -804,11 +891,45 @@ export default function App() {
       // 2. Recover/sync transactions (Cloud data is authoritative source of truth)
       if (downloadedTx && downloadedTx.length > 0) {
         setTransactions(downloadedTx);
-        localStorage.setItem('kuma_transactions', JSON.stringify(downloadedTx));
+        try {
+          localStorage.setItem('kuma_transactions', JSON.stringify(downloadedTx));
+          localStorage.setItem('kuma_transactions_backup', JSON.stringify({
+            savedAt: Date.now(),
+            data: downloadedTx
+          }));
+        } catch (e) {
+          console.warn("Storage write error:", e);
+        }
       } else {
-        // Zero transactions for new/empty user (no sample/demo data)
-        setTransactions([]);
-        localStorage.setItem('kuma_transactions', JSON.stringify([]));
+        // If Cloud returned empty or null, check if this device had existing recorded transactions
+        let localExisting: Transaction[] = [];
+        try {
+          if (transactionsRef.current && transactionsRef.current.length > 0) {
+            localExisting = transactionsRef.current;
+          } else {
+            const raw = localStorage.getItem('kuma_transactions');
+            if (raw) localExisting = JSON.parse(raw);
+            if (!localExisting || localExisting.length === 0) {
+              const backupRaw = localStorage.getItem('kuma_transactions_backup');
+              if (backupRaw) {
+                const b = JSON.parse(backupRaw);
+                if (b?.data && Array.isArray(b.data)) localExisting = b.data;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("Storage check error:", e);
+        }
+
+        if (localExisting && localExisting.length > 0) {
+          // Keep existing local transactions and sync up to user's cloud account!
+          setTransactions(localExisting);
+          uploadTransactionsToCloud(userSyncKey, localExisting);
+        } else {
+          // Zero transactions for new/empty user
+          setTransactions([]);
+          localStorage.setItem('kuma_transactions', JSON.stringify([]));
+        }
       }
 
       addToast(`ยินดีต้อนรับกลับมาครับคุณ ${username}! เข้าสู่ระบบเรียบร้อยแล้ว 🧸✨`, 'success');
@@ -954,58 +1075,96 @@ export default function App() {
   // --- Save / Edit / Delete Core Handlers ---
   const handleSaveTransaction = (txData: Omit<Transaction, 'id' | 'createdAt'> & { id?: string }) => {
     let updated: Transaction[];
+    let targetTx: Transaction;
 
     if (txData.id) {
       // Editing
+      targetTx = { ...txData, createdAt: transactions.find(t => t.id === txData.id)?.createdAt || Date.now() } as Transaction;
       updated = transactions.map(t => 
         t.id === txData.id 
-          ? { ...t, ...txData, createdAt: t.createdAt } as Transaction
+          ? targetTx
           : t
       );
       addToast('แก้ไขบันทึกเรียบร้อยแล้วค่ะ! ✨');
       setEditingTransaction(null);
     } else {
       // Adding new
-      const newTx: Transaction = {
+      targetTx = {
         ...txData,
         id: 'tx-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
         createdAt: Date.now()
       } as Transaction;
 
-      updated = [newTx, ...transactions];
+      updated = [targetTx, ...transactions];
       addToast('จดบัญชีเรียบร้อย คุมะคุงบันทึกให้แล้วครับ! 🧸🎉');
 
       // Mascot Reaction logic
-      if (newTx.type === 'income') {
-        if (newTx.amount >= 2000) {
+      if (targetTx.type === 'income') {
+        if (targetTx.amount >= 2000) {
           triggerMascotReaction(
             'celebrate',
-            `ว้าวววสุดยอด! 🎉 คุณจดรายรับก้อนโตตั้ง ฿${newTx.amount.toLocaleString()} แน่ะ คุมะคุงตื่นเต้นดีใจมากเลยฮะ! ✨🧸💰`
+            `ว้าวววสุดยอด! 🎉 คุณจดรายรับก้อนโตตั้ง ฿${targetTx.amount.toLocaleString()} แน่ะ คุมะคุงตื่นเต้นดีใจมากเลยฮะ! ✨🧸💰`
           );
         } else {
           triggerMascotReaction(
             'happy',
-            `ยินดีด้วยกับรายรับ ฿${newTx.amount.toLocaleString()} นะค้าบ! มีเงินสะสมเพิ่มขึ้นแล้ว เย้ๆ 💖🧸`
+            `ยินดีด้วยกับรายรับ ฿${targetTx.amount.toLocaleString()} นะค้าบ! มีเงินสะสมเพิ่มขึ้นแล้ว เย้ๆ 💖🧸`
           );
         }
       } else {
-        triggerMascotReaction(
-          'happy',
-          `จดรายจ่ายเรียบร้อย ฿${newTx.amount.toLocaleString()} ครับ คุมะคุงบันทึกใส่สมุดบัญชีแล้วน้า 🧸📝`
-        );
+        // Expense reaction logic: check budget limits and large expense thresholds
+        const txMonth = targetTx.date.substring(0, 7);
+        const currentMonthBudget = monthlyBudgets[txMonth] || monthlyBudgets[selectedMonth];
+        const currentMonthExpenses = updated
+          .filter(t => t.type === 'expense' && t.date.startsWith(txMonth))
+          .reduce((sum, t) => sum + t.amount, 0);
+
+        if (currentMonthBudget && currentMonthExpenses > currentMonthBudget) {
+          triggerMascotReaction(
+            'shocked',
+            `🚨 โอ๊ะโอ! รายจ่าย ฿${targetTx.amount.toLocaleString()} ทำให้ยอดใช้จ่ายเดือนนี้เกินงบที่ตั้งไว้ ฿${currentMonthBudget.toLocaleString()} แล้วนะคุมะ! ประหยัดด่วนๆ เลยน้า 🧸💥`,
+            'warning'
+          );
+        } else if (currentMonthBudget && currentMonthExpenses >= currentMonthBudget * 0.85) {
+          triggerMascotReaction(
+            'shocked',
+            `⚠️ เตือนภัยคุมะ! ตอนนี้ใช้เงินไปแล้ว ฿${currentMonthExpenses.toLocaleString()} ใกล้จะหมดงบ ฿${currentMonthBudget.toLocaleString()} แล้วน้า (ใช้ไป ${Math.round((currentMonthExpenses / currentMonthBudget) * 100)}%) 🧸💧`,
+            'warning'
+          );
+        } else if (targetTx.amount >= 3000) {
+          triggerMascotReaction(
+            'shocked',
+            `โอ๊ะโอ! รายจ่ายก้อนโต ฿${targetTx.amount.toLocaleString()} บันทึกแล้วนะค้าบ วางแผนการเงินรอบคอบน้าคุมะ 🧸💭`,
+            'warning'
+          );
+        } else {
+          triggerMascotReaction(
+            'happy',
+            `จดรายจ่ายเรียบร้อย ฿${targetTx.amount.toLocaleString()} ครับ คุมะคุงบันทึกใส่สมุดบัญชีแล้วน้า 🧸📝`
+          );
+        }
       }
     }
 
     setTransactions(updated);
     try {
       localStorage.setItem('kuma_transactions', JSON.stringify(updated));
+      localStorage.setItem('kuma_transactions_backup', JSON.stringify({
+        savedAt: Date.now(),
+        data: updated
+      }));
     } catch (err) {
       console.warn("localStorage quota exceeded, skipping local storage cache:", err);
     }
     setDefaultAddDate(undefined);
     setActiveTab('dashboard');
 
-    // Trigger Cloud auto backup
+    // Immediately persist single transaction directly to Cloud Firestore
+    if (syncKey) {
+      saveTransactionToCloud(syncKey, targetTx);
+    }
+
+    // Trigger Cloud auto backup for full set
     triggerAutoCloudBackup(updated);
   };
 
@@ -1016,9 +1175,22 @@ export default function App() {
       () => {
         const updated = transactions.filter(t => t.id !== id);
         setTransactions(updated);
-        localStorage.setItem('kuma_transactions', JSON.stringify(updated));
+        try {
+          localStorage.setItem('kuma_transactions', JSON.stringify(updated));
+          localStorage.setItem('kuma_transactions_backup', JSON.stringify({
+            savedAt: Date.now(),
+            data: updated
+          }));
+        } catch (e) {
+          console.warn("Storage update error:", e);
+        }
         addToast('ลบรายการเรียบร้อยแล้วครับ 🗑️');
         
+        // Directly remove from cloud
+        if (syncKey) {
+          deleteTransactionFromCloud(syncKey, id);
+        }
+
         // Sync to cloud
         triggerAutoCloudBackup(updated);
       },
@@ -1170,6 +1342,133 @@ export default function App() {
       setIsSyncing(false);
       return false;
     }
+  };
+
+  // --- Export Full Offline JSON Backup ---
+  const handleExportJSON = () => {
+    try {
+      const backupData = {
+        version: 1,
+        appName: 'Kuma Wallet',
+        exportedAt: new Date().toISOString(),
+        syncKey: syncKey,
+        loggedInUser: loggedInUser,
+        transactions: transactions,
+        incomeCategories: incomeCategories,
+        expenseCategories: expenseCategories,
+        monthlyBudgets: monthlyBudgets,
+        savingsGoals: savingsGoals,
+        bankAccounts: bankAccounts,
+        themeId: selectedThemeId
+      };
+
+      const jsonStr = JSON.stringify(backupData, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const dateStr = new Date().toISOString().split('T')[0];
+      link.href = url;
+      link.setAttribute('download', `kuma-wallet-backup-${dateStr}.json`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      addToast('📁 ดาวน์โหลดไฟล์สำรองข้อมูล JSON ลงเครื่องเรียบร้อยแล้วครับ! 💾✨', 'success');
+    } catch (err) {
+      console.error('Export JSON error:', err);
+      addToast('❌ เกิดข้อผิดพลาดในการสร้างไฟล์สำรองข้อมูล', 'error');
+    }
+  };
+
+  // --- Import Full Offline JSON Backup ---
+  const handleImportJSON = async (file: File): Promise<boolean> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const content = e.target?.result as string;
+          if (!content) {
+            addToast('❌ ไฟล์ว่างเปล่าหรือไม่ถูกต้อง', 'error');
+            resolve(false);
+            return;
+          }
+
+          const parsed = JSON.parse(content);
+          if (!parsed || (typeof parsed !== 'object')) {
+            addToast('❌ โครงสร้างไฟล์สำรองข้อมูลไม่ถูกต้อง', 'error');
+            resolve(false);
+            return;
+          }
+
+          // 1. Transactions
+          if (Array.isArray(parsed.transactions)) {
+            setTransactions(parsed.transactions);
+            localStorage.setItem('kuma_transactions', JSON.stringify(parsed.transactions));
+          }
+
+          // 2. Categories
+          if (Array.isArray(parsed.incomeCategories) && Array.isArray(parsed.expenseCategories)) {
+            setIncomeCategories(parsed.incomeCategories);
+            setExpenseCategories(parsed.expenseCategories);
+            localStorage.setItem('kuma_income_categories', JSON.stringify(parsed.incomeCategories));
+            localStorage.setItem('kuma_expense_categories', JSON.stringify(parsed.expenseCategories));
+          }
+
+          // 3. Monthly Budgets
+          if (parsed.monthlyBudgets && typeof parsed.monthlyBudgets === 'object') {
+            setMonthlyBudgets(parsed.monthlyBudgets);
+            localStorage.setItem('kuma_monthly_budgets', JSON.stringify(parsed.monthlyBudgets));
+          }
+
+          // 4. Savings Goals
+          if (Array.isArray(parsed.savingsGoals)) {
+            setSavingsGoals(parsed.savingsGoals);
+            localStorage.setItem('kuma_savings_goals', JSON.stringify(parsed.savingsGoals));
+          }
+
+          // 5. Bank Accounts
+          if (Array.isArray(parsed.bankAccounts) && parsed.bankAccounts.length > 0) {
+            setBankAccounts(parsed.bankAccounts);
+            localStorage.setItem('kuma_bank_accounts', JSON.stringify(parsed.bankAccounts));
+          }
+
+          // 6. Theme
+          if (parsed.themeId && APP_THEMES.some(t => t.id === parsed.themeId)) {
+            setSelectedThemeId(parsed.themeId as ThemeType);
+            localStorage.setItem('kuma_theme', parsed.themeId);
+          }
+
+          // Auto push imported data to current cloud sync key
+          if (syncKey) {
+            uploadTransactionsToCloud(syncKey, parsed.transactions || transactions);
+            uploadUserProfileToCloud(syncKey, {
+              incomeCategories: parsed.incomeCategories || incomeCategories,
+              expenseCategories: parsed.expenseCategories || expenseCategories,
+              monthlyBudgets: parsed.monthlyBudgets || monthlyBudgets,
+              savingsGoals: parsed.savingsGoals || savingsGoals,
+              bankAccounts: parsed.bankAccounts || bankAccounts,
+              themeId: parsed.themeId || selectedThemeId
+            });
+            const now = Date.now();
+            setLastSyncedAt(now);
+            localStorage.setItem('kuma_last_synced', now.toString());
+          }
+
+          addToast('🎉 กู้คืนข้อมูลจากไฟล์ JSON สำเร็จเรียบร้อยแล้วครับ! 🧸✨', 'success');
+          resolve(true);
+        } catch (err) {
+          console.error('Import JSON parsing error:', err);
+          addToast('❌ ไม่สามารถอ่านไฟล์ JSON ได้ กรุณาตรวจสอบว่าเป็นไฟล์สำรองที่ถูกต้อง', 'error');
+          resolve(false);
+        }
+      };
+      reader.onerror = () => {
+        addToast('❌ เกิดข้อผิดพลาดในการเปิดไฟล์', 'error');
+        resolve(false);
+      };
+      reader.readAsText(file);
+    });
   };
 
   // --- Reminders save callback ---
@@ -2014,6 +2313,23 @@ export default function App() {
             </button>
           )}
 
+          {/* Quick Sound FX toggle button */}
+          <button
+            onClick={handleToggleSound}
+            className={`p-2 rounded-xl border transition-all active:scale-95 ${
+              isDark 
+                ? isSoundOn 
+                  ? 'bg-slate-900 border-slate-800 text-amber-400 hover:bg-slate-800'
+                  : 'bg-slate-900 border-slate-800 text-slate-500 hover:bg-slate-800' 
+                : isSoundOn
+                  ? 'bg-white border-slate-200 text-[#8BA888] hover:bg-slate-50'
+                  : 'bg-slate-100 border-slate-200 text-slate-400 hover:bg-slate-200'
+            }`}
+            title={isSoundOn ? 'ปิดเสียงเอฟเฟกต์ (Mute Sound)' : 'เปิดเสียงเอฟเฟกต์ (Unmute Sound)'}
+          >
+            {isSoundOn ? <Volume2 size={14} /> : <VolumeX size={14} />}
+          </button>
+
           {/* Quick theme cycle button */}
           <button
             onClick={() => {
@@ -2123,7 +2439,7 @@ export default function App() {
                   }
             }
             onClick={() => {
-              triggerMascotReaction('happy', 'ฮิฮิ คุมะคุงดีใจจังที่คุณมากอดตัวผม บันทึกรายวันกันต่อเลยนะคุมะ! 💖🧸✨');
+              triggerMascotReaction('happy', 'ฮิฮิ คุมะคุงดีใจจังที่คุณมากอดตัวผม บันทึกรายวันกันต่อเลยนะคุมะ! 💖🧸✨', 'tap');
             }}
           >
             {mascotEmoji}
@@ -3479,6 +3795,98 @@ export default function App() {
               </div>
             </div>
 
+            {/* 1.5. Cute Sound Effects Card */}
+            <div className={`p-4 rounded-3xl border transition-all ${
+              isDark ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-100 shadow-sm'
+            }`}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <div className={`p-2 rounded-xl ${isDark ? 'bg-amber-500/10 text-amber-400' : 'bg-rose-50 text-rose-500'}`}>
+                    <Volume2 size={16} />
+                  </div>
+                  <div>
+                    <h3 className={`text-sm font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>
+                      เสียงเอฟเฟกต์คุมะคุง (Sound Effects) 🔔
+                    </h3>
+                    <p className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-400'}`}>
+                      เสียงดนตรีน่ารักสังเคราะห์ Web Audio API สำหรับฟีดแบ็ก
+                    </p>
+                  </div>
+                </div>
+
+                {/* Toggle switch */}
+                <button
+                  type="button"
+                  onClick={handleToggleSound}
+                  className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors duration-200 ${
+                    isSoundOn
+                      ? isDark ? 'bg-amber-500' : 'bg-rose-500'
+                      : isDark ? 'bg-slate-800' : 'bg-slate-200'
+                  }`}
+                >
+                  <div
+                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ${
+                      isSoundOn ? 'translate-x-6' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Sound Test / Preview Buttons */}
+              <div className="space-y-2 pt-1">
+                <p className="text-[10px] font-bold text-slate-400">กดทดลองฟังเสียงฟีดแบ็กน่ารักๆ:</p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    onClick={() => {
+                      soundFx.playCelebrate();
+                      triggerMascotReaction('celebrate', '🌟 เย้ๆ! เสียงฉลองสำเร็จเป้าหมายการออมและเงินสะสมก้อนโตค้าบ! ✨🧸');
+                    }}
+                    className={`p-2 rounded-xl border text-[10px] font-extrabold flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                      isDark ? 'bg-slate-950 border-slate-800 text-amber-400 hover:bg-slate-900' : 'bg-amber-50/60 border-amber-200/60 text-amber-700 hover:bg-amber-100/60'
+                    }`}
+                  >
+                    <span>🌟</span> ฉลองสำเร็จการออม
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      soundFx.playHappy();
+                      triggerMascotReaction('happy', '💖 เสียงสดใสเมื่อจดบันทึกรายรับหรือฝากเงินเข้าเป้าหมายฮะ! 🧸✨');
+                    }}
+                    className={`p-2 rounded-xl border text-[10px] font-extrabold flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                      isDark ? 'bg-slate-950 border-slate-800 text-rose-400 hover:bg-slate-900' : 'bg-rose-50/60 border-rose-200/60 text-rose-600 hover:bg-rose-100/60'
+                    }`}
+                  >
+                    <span>💖</span> จดรายรับ / แฮปปี้
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      soundFx.playWarning();
+                      triggerMascotReaction('shocked', '🚨 เสียงเตือนนุ่มนวลเมื่อรายจ่ายสูงหรือยอดใช้จ่ายใกล้เกินงบประมาณค้าบ! 🧸💥', 'warning');
+                    }}
+                    className={`p-2 rounded-xl border text-[10px] font-extrabold flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                      isDark ? 'bg-slate-950 border-slate-800 text-red-400 hover:bg-slate-900' : 'bg-red-50/60 border-red-200/60 text-red-600 hover:bg-red-100/60'
+                    }`}
+                  >
+                    <span>🚨</span> เตือนรายจ่ายสูง/เกินงบ
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      soundFx.playTap();
+                      triggerMascotReaction('happy', '🐾 ดึ๋ง! สัมผัสกอดน้องหมีคุมะคุง 🧸💕', 'tap');
+                    }}
+                    className={`p-2 rounded-xl border text-[10px] font-extrabold flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                      isDark ? 'bg-slate-950 border-slate-800 text-emerald-400 hover:bg-slate-900' : 'bg-emerald-50/60 border-emerald-200/60 text-emerald-700 hover:bg-emerald-100/60'
+                    }`}
+                  >
+                    <span>🐾</span> กอดน้องหมีคุมะคุง
+                  </button>
+                </div>
+              </div>
+            </div>
+
             {/* PWA App Icon Installation Guide Card */}
             <div className={`p-4 rounded-3xl border transition-all ${
               isDark ? 'bg-slate-900/50 border-slate-800' : 'bg-white border-slate-100 shadow-sm'
@@ -3613,6 +4021,8 @@ export default function App() {
               isDark={isDark}
               onSyncNow={handleManualSyncNow}
               onRestoreWithKey={handleRestoreWithKey}
+              onExportJSON={handleExportJSON}
+              onImportJSON={handleImportJSON}
               isSyncing={isSyncing}
               accentClass={currentTheme.accent}
               secondaryBtnClass={currentTheme.secondary}

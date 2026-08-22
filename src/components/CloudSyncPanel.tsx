@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Cloud, Copy, RefreshCw, Key, ArrowLeftRight, Check, HelpCircle } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Cloud, Copy, RefreshCw, Key, ArrowLeftRight, Check, FileDown, FileUp, ShieldCheck } from 'lucide-react';
 
 interface CloudSyncPanelProps {
   syncKey: string;
@@ -7,6 +7,8 @@ interface CloudSyncPanelProps {
   isDark: boolean;
   onSyncNow: () => void;
   onRestoreWithKey: (key: string) => Promise<boolean>;
+  onExportJSON?: () => void;
+  onImportJSON?: (file: File) => Promise<boolean>;
   isSyncing: boolean;
   accentClass?: string;
   secondaryBtnClass?: string;
@@ -18,6 +20,8 @@ export const CloudSyncPanel: React.FC<CloudSyncPanelProps> = ({
   isDark,
   onSyncNow,
   onRestoreWithKey,
+  onExportJSON,
+  onImportJSON,
   isSyncing,
   accentClass,
   secondaryBtnClass
@@ -26,6 +30,7 @@ export const CloudSyncPanel: React.FC<CloudSyncPanelProps> = ({
   const [copied, setCopied] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
   const [showRestoreBox, setShowRestoreBox] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(syncKey);
@@ -45,6 +50,15 @@ export const CloudSyncPanel: React.FC<CloudSyncPanelProps> = ({
       setInputKey('');
       setShowRestoreBox(false);
     }
+  };
+
+  const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !onImportJSON) return;
+    setIsRestoring(true);
+    await onImportJSON(file);
+    setIsRestoring(false);
+    e.target.value = '';
   };
 
   // Format sync timestamp
@@ -137,7 +151,7 @@ export const CloudSyncPanel: React.FC<CloudSyncPanelProps> = ({
       {!showRestoreBox ? (
         <button
           onClick={() => setShowRestoreBox(true)}
-          className={`w-full py-2 px-3 border border-dashed rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all ${
+          className={`w-full py-2 px-3 border border-dashed rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all mb-3 ${
             isDark 
               ? 'border-slate-800 text-slate-400 hover:bg-slate-800/40' 
               : 'border-slate-200 text-slate-500 hover:bg-slate-50'
@@ -147,7 +161,7 @@ export const CloudSyncPanel: React.FC<CloudSyncPanelProps> = ({
           <span>เชื่อมต่อกับเครื่องอื่นด้วยรหัสซิงค์ (Sync Key)</span>
         </button>
       ) : (
-        <form onSubmit={handleRestore} className="space-y-2 slide-up">
+        <form onSubmit={handleRestore} className="space-y-2 slide-up mb-3">
           <div className="border-t border-dashed border-slate-200 dark:border-slate-800 pt-3">
             <label className={`block text-[10px] font-semibold mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
               กรอกรหัส Sync Key เพื่อดึงข้อมูล:
@@ -187,6 +201,56 @@ export const CloudSyncPanel: React.FC<CloudSyncPanelProps> = ({
           </div>
         </form>
       )}
+
+      {/* Manual JSON File Backup / Restore (100% Offline Data Protection) */}
+      <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1">
+            <ShieldCheck size={12} className="text-emerald-500" /> สำรองข้อมูลลงเครื่อง (Offline JSON File)
+          </span>
+          <span className="text-[9px] text-slate-400 font-semibold">บันทึกเป็นไฟล์ .json</span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          {onExportJSON && (
+            <button
+              onClick={onExportJSON}
+              className={`py-2 px-2.5 rounded-xl border text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                isDark 
+                  ? 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-900' 
+                  : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <FileDown size={13} className="text-emerald-500" />
+              <span>ดาวน์โหลดไฟล์สำรอง</span>
+            </button>
+          )}
+
+          {onImportJSON && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                onChange={handleFileImport}
+                className="hidden"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isRestoring}
+                className={`py-2 px-2.5 rounded-xl border text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 disabled:opacity-50 ${
+                  isDark 
+                    ? 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-900' 
+                    : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <FileUp size={13} className="text-indigo-500" />
+                <span>{isRestoring ? 'กำลังกู้คืน...' : 'กู้คืนจากไฟล์ JSON'}</span>
+              </button>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
